@@ -24,5 +24,5 @@ O `player_id` identifica o jogador autenticado pelo Keycloak. Cada carteira tamb
 - A combinação de jogador e moeda deve ser única.
 - O saldo não pode ficar negativo.
 - A moeda da operação deve ser igual à moeda da carteira.
-- Toda carteira deve ser criada junto com uma operação interna `OPENING`, na mesma transação SQL. O saldo inicial pode ser zero; se for maior que zero, também deve existir um lançamento de crédito no ledger.
+- Se a carteira for aberta com saldo inicial maior que zero, a criação, a operação interna `OPENING` e o lançamento de crédito no ledger devem acontecer na mesma transação SQL. Se começar com saldo zero, não são criados `OPENING`, lançamento no ledger nem eventos financeiros.
 - O saldo, a operação e o lançamento correspondente precisam ser confirmados juntos no banco.
