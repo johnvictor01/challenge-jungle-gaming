@@ -32,3 +32,9 @@ Se a carteira tem `120.00 BRL` e uma aposta aceita retira `20.00 BRL`, o lançam
 - O saldo posterior deve corresponder ao saldo anterior mais ou menos o valor, conforme a direção.
 - O ledger é append-only: lançamentos não são editados nem apagados. Para corrigir um valor, o sistema cria uma nova operação e um novo lançamento.
 - A atualização da carteira e a gravação do lançamento devem acontecer no mesmo commit do banco.
+
+## Como vou testar
+
+Nos testes de domínio, vou conferir se crédito soma o valor e débito subtrai, sempre mantendo a moeda. Também vou testar direção inválida, valor zero ou negativo, saldo negativo, moeda diferente, conta incorreta entre os saldos, débito maior que o saldo e overflow.
+
+Vou conferir também se não consigo criar um lançamento sem ID da carteira ou da operação e se a reidratação mantém a data registrada. No PostgreSQL, vou testar que a mesma operação não cria dois lançamentos para a carteira e que um lançamento existente não pode ser editado ou apagado.
