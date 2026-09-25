@@ -23,9 +23,11 @@ services:
         condition: service_healthy
     volumes:
       - ../migrations:/migrations:ro
-    command:
+    entrypoint:
+      - migrate
       - -path=/migrations
       - -database=postgres://${POSTGRES_USER:-challenge}:${POSTGRES_PASSWORD:-challenge-local-only}@postgres:5432/${POSTGRES_DB:-backend_challenge}?sslmode=disable
+    command:
       - up
 
 volumes:
