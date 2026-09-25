@@ -45,6 +45,6 @@ Ordem atual:
 4. `000004`: inbox de mensagens SQS.
 5. `000005`: outbox de eventos.
 
-O fluxo de criação de carteira deve inserir a carteira e sua operação `OPENING` na mesma transação SQL. A regra adiada no banco confere a existência da `OPENING` no commit. Se o saldo inicial for maior que zero, a aplicação também grava o lançamento de crédito no ledger antes do commit.
+Se a carteira for aberta com saldo inicial maior que zero, a aplicação deve inserir a carteira, a operação `OPENING`, o lançamento de crédito no ledger e os eventos correspondentes na mesma transação SQL. Conforme o README do challenge, saldo inicial zero não cria operação `OPENING`, lançamento no ledger nem eventos financeiros.
 
 O banco impede mais de uma reversão (`REFUND` ou `ROLLBACK`) para a mesma operação de origem. Uma reversão resolvida precisa apontar para uma operação processada compatível, na mesma carteira e rodada, e usar o mesmo valor. A política permite reverter um `REFUND` com `ROLLBACK`, conforme o tipo de referência aceito pelo README.

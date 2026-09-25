@@ -50,7 +50,7 @@ CREATE TABLE wager_transactions (
     ),
     CONSTRAINT wager_transactions_amount_check CHECK (
         (kind = 'LOSS' AND amount_minor = 0)
-        OR (kind = 'OPENING' AND amount_minor >= 0)
+        OR (kind = 'OPENING' AND amount_minor > 0)
         OR (kind IN ('BET', 'WIN', 'REFUND', 'ROLLBACK') AND amount_minor > 0)
     ),
     CONSTRAINT wager_transactions_reference_check CHECK (
@@ -99,29 +99,6 @@ ALTER TABLE wager_transactions
     ADD CONSTRAINT wager_transactions_reference_matches_wallet_fk
     FOREIGN KEY (reference_transaction_id, provider_id, wallet_id, player_id, currency, round_id, reference_external_transaction_id)
     REFERENCES wager_transactions (id, provider_id, wallet_id, player_id, currency, round_id, external_transaction_id);
-
-CREATE FUNCTION require_wallet_opening_transaction() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM wager_transactions wt
-        WHERE wt.wallet_id = NEW.id
-          AND wt.origin = 'INTERNAL'
-          AND wt.kind = 'OPENING'
-          AND wt.player_id = NEW.player_id
-          AND wt.currency = NEW.currency
-    ) THEN
-        RAISE EXCEPTION 'wallet % must have an OPENING transaction before commit', NEW.id;
-    END IF;
-    RETURN NULL;
-END;
-$$;
-
-CREATE CONSTRAINT TRIGGER wallets_require_opening_transaction
-    AFTER INSERT ON wallets
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION require_wallet_opening_transaction();
 
 CREATE FUNCTION validate_wager_reference() RETURNS trigger
 LANGUAGE plpgsql AS $$
