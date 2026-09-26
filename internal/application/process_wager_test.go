@@ -15,9 +15,9 @@ func processService(state *memoryState) (*ProcessWagerService, *memoryUnitOfWork
 
 func wagerCommand(wallet *domain.Wallet, kind domain.TransactionKind, amount int64, key, externalID string) ProcessWagerCommand {
 	return ProcessWagerCommand{
-		WalletID: wallet.ID, PlayerID: wallet.PlayerID, ProviderID: "provider-1",
+		WalletID: wallet.ID(), PlayerID: wallet.PlayerID(), ProviderID: "provider-1",
 		ExternalTransactionID: externalID, IdempotencyKey: key, RoundID: "round-1", GameID: "game-1",
-		Kind: kind, Amount: domain.Money{Units: amount, Currency: wallet.Currency},
+		Kind: kind, Amount: testMoney(amount, wallet.Currency()),
 	}
 }
 
@@ -30,13 +30,13 @@ func TestProcessWagerBetSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units != 7_500 {
+	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units() != 7_500 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if got := uow.state.wallets[wallet.ID].Balance.Units; got != 7_500 {
+	if got := uow.state.wallets[wallet.ID()].Balance().Units(); got != 7_500 {
 		t.Errorf("balance = %d, want 7500", got)
 	}
-	if len(uow.state.ledger) != 1 || uow.state.ledger[0].Direction != domain.DirectionDebit {
+	if len(uow.state.ledger) != 1 || uow.state.ledger[0].Direction() != domain.DirectionDebit {
 		t.Errorf("ledger = %+v, want one debit", uow.state.ledger)
 	}
 	if len(uow.state.events) != 2 {
@@ -55,7 +55,7 @@ func TestProcessWagerInsufficientFunds(t *testing.T) {
 	if result.Status != domain.TransactionRejected || result.FailureCode != "INSUFFICIENT_FUNDS" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if got := uow.state.wallets[wallet.ID].Balance.Units; got != 1_000 {
+	if got := uow.state.wallets[wallet.ID()].Balance().Units(); got != 1_000 {
 		t.Errorf("balance = %d, want 1000", got)
 	}
 	if len(uow.state.ledger) != 0 || len(uow.state.events) != 1 {
@@ -71,10 +71,10 @@ func TestProcessWagerLossDoesNotChangeWallet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units != 1_000 {
+	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units() != 1_000 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if got := uow.state.wallets[wallet.ID].Version; got != 1 {
+	if got := uow.state.wallets[wallet.ID()].Version(); got != 1 {
 		t.Errorf("wallet version = %d, want 1", got)
 	}
 	if len(uow.state.ledger) != 0 || len(uow.state.events) != 1 {
@@ -144,7 +144,7 @@ func TestProcessWagerMissingReference(t *testing.T) {
 	if result.Status != domain.TransactionPendingReference {
 		t.Fatalf("status = %s, want PENDING_REFERENCE", result.Status)
 	}
-	if uow.state.wallets[wallet.ID].Balance.Units != 500 || len(uow.state.ledger) != 0 || len(uow.state.events) != 1 {
+	if uow.state.wallets[wallet.ID()].Balance().Units() != 500 || len(uow.state.ledger) != 0 || len(uow.state.events) != 1 {
 		t.Errorf("missing reference changed wallet or emitted wrong records")
 	}
 }
@@ -152,8 +152,8 @@ func TestProcessWagerMissingReference(t *testing.T) {
 func TestProcessWagerResolvedReference(t *testing.T) {
 	state := newMemoryState()
 	wallet := seedMemoryWallet(t, state, 500)
-	reference := &domain.WagerTransaction{ID: "bet-id", Origin: domain.TransactionExternal, WalletID: wallet.ID, PlayerID: wallet.PlayerID, Currency: wallet.Currency, ProviderID: "provider-1", ExternalTransactionID: "bet-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: 1_500, Currency: "BRL"}, RoundID: "round-1", Status: domain.TransactionProcessed}
-	state.transactions[reference.ID] = reference
+	reference := processedExternalTransaction(wallet, "bet-id", "bet-1", domain.TransactionBet, 1_500, "")
+	state.transactions[reference.ID()] = reference
 	service, uow := processService(state)
 	command := wagerCommand(wallet, domain.TransactionRefund, 1_500, "idem-1", "refund-1")
 	command.ReferenceExternalTransactionID = "bet-1"
@@ -161,10 +161,10 @@ func TestProcessWagerResolvedReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units != 2_000 {
+	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units() != 2_000 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if len(uow.state.ledger) != 1 || uow.state.ledger[0].Direction != domain.DirectionCredit {
+	if len(uow.state.ledger) != 1 || uow.state.ledger[0].Direction() != domain.DirectionCredit {
 		t.Errorf("ledger = %+v, want one credit", uow.state.ledger)
 	}
 }
@@ -172,10 +172,10 @@ func TestProcessWagerResolvedReference(t *testing.T) {
 func TestProcessWagerRejectsSecondReversalOfReference(t *testing.T) {
 	state := newMemoryState()
 	wallet := seedMemoryWallet(t, state, 3_000)
-	reference := &domain.WagerTransaction{ID: "bet-id", Origin: domain.TransactionExternal, WalletID: wallet.ID, PlayerID: wallet.PlayerID, Currency: wallet.Currency, ProviderID: "provider-1", ExternalTransactionID: "bet-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: 1_500, Currency: "BRL"}, RoundID: "round-1", Status: domain.TransactionProcessed}
-	previousRefund := &domain.WagerTransaction{ID: "refund-id", Origin: domain.TransactionExternal, WalletID: wallet.ID, PlayerID: wallet.PlayerID, Currency: wallet.Currency, ProviderID: "provider-1", ExternalTransactionID: "refund-1", IdempotencyKey: "refund-key", Kind: domain.TransactionRefund, ReferenceExternalTransactionID: "bet-1", ReferenceTransactionID: reference.ID, Amount: domain.Money{Units: 1_500, Currency: "BRL"}, RoundID: "round-1", Status: domain.TransactionProcessed}
-	state.transactions[reference.ID] = reference
-	state.transactions[previousRefund.ID] = previousRefund
+	reference := processedExternalTransaction(wallet, "bet-id", "bet-1", domain.TransactionBet, 1_500, "")
+	previousRefund := processedExternalTransaction(wallet, "refund-id", "refund-1", domain.TransactionRefund, 1_500, "bet-1")
+	state.transactions[reference.ID()] = reference
+	state.transactions[previousRefund.ID()] = previousRefund
 	service, uow := processService(state)
 	command := wagerCommand(wallet, domain.TransactionRollback, 1_500, "rollback-key", "rollback-1")
 	command.ReferenceExternalTransactionID = "bet-1"
@@ -186,7 +186,7 @@ func TestProcessWagerRejectsSecondReversalOfReference(t *testing.T) {
 	if result.Status != domain.TransactionRejected || result.FailureCode != "REFERENCE_ALREADY_REVERSED" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if uow.state.wallets[wallet.ID].Balance.Units != 3_000 || len(uow.state.ledger) != 0 {
+	if uow.state.wallets[wallet.ID()].Balance().Units() != 3_000 || len(uow.state.ledger) != 0 {
 		t.Errorf("duplicate reversal changed wallet or ledger")
 	}
 }
@@ -194,8 +194,8 @@ func TestProcessWagerRejectsSecondReversalOfReference(t *testing.T) {
 func TestProcessWagerRollbackInsufficientBalance(t *testing.T) {
 	state := newMemoryState()
 	wallet := seedMemoryWallet(t, state, 500)
-	reference := &domain.WagerTransaction{ID: "win-id", Origin: domain.TransactionExternal, WalletID: wallet.ID, PlayerID: wallet.PlayerID, Currency: wallet.Currency, ProviderID: "provider-1", ExternalTransactionID: "win-1", Kind: domain.TransactionWin, Amount: domain.Money{Units: 1_500, Currency: "BRL"}, RoundID: "round-1", Status: domain.TransactionProcessed}
-	state.transactions[reference.ID] = reference
+	reference := processedExternalTransaction(wallet, "win-id", "win-1", domain.TransactionWin, 1_500, "")
+	state.transactions[reference.ID()] = reference
 	service, uow := processService(state)
 	command := wagerCommand(wallet, domain.TransactionRollback, 1_500, "idem-1", "rollback-1")
 	command.ReferenceExternalTransactionID = "win-1"
@@ -206,7 +206,7 @@ func TestProcessWagerRollbackInsufficientBalance(t *testing.T) {
 	if result.Status != domain.TransactionRejected || result.FailureCode != "REVERSAL_INSUFFICIENT_FUNDS" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if uow.state.wallets[wallet.ID].Balance.Units != 500 || len(uow.state.ledger) != 0 {
+	if uow.state.wallets[wallet.ID()].Balance().Units() != 500 || len(uow.state.ledger) != 0 {
 		t.Errorf("rejected rollback changed wallet or ledger")
 	}
 }
@@ -220,7 +220,7 @@ func TestProcessWagerPersistenceFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want injected persistence failure")
 	}
-	if uow.state.wallets[wallet.ID].Balance.Units != 10_000 || len(uow.state.transactions) != 0 || len(uow.state.ledger) != 0 || len(uow.state.events) != 0 {
+	if uow.state.wallets[wallet.ID()].Balance().Units() != 10_000 || len(uow.state.transactions) != 0 || len(uow.state.ledger) != 0 || len(uow.state.events) != 0 {
 		t.Errorf("UnitOfWork did not roll back all changes: %+v", uow.state)
 	}
 }

@@ -44,7 +44,11 @@ type fakeProcessor struct {
 func (p *fakeProcessor) Execute(_ context.Context, command application.ProcessWagerCommand) (application.ProcessWagerResult, error) {
 	p.called = true
 	p.command = command
-	return application.ProcessWagerResult{TransactionID: "tx-1", Status: domain.TransactionProcessed, Balance: &domain.Money{Units: 4_000, Currency: "BRL"}}, nil
+	money, err := domain.NewMoney(4_000, "BRL")
+	if err != nil {
+		return application.ProcessWagerResult{}, err
+	}
+	return application.ProcessWagerResult{TransactionID: "tx-1", Status: domain.TransactionProcessed, Balance: &money}, nil
 }
 
 type fakeQueries struct{}

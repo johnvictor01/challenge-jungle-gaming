@@ -54,7 +54,7 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 		t.Fatal(err)
 	}
 	walletResult, err := application.NewOpenWalletService(store, ids).Execute(ctx, application.OpenWalletCommand{
-		PlayerID: playerID, InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+		PlayerID: playerID, InitialBalance: testMoney(10_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,10 +69,10 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := application.ProcessWagerCommand{
-		WalletID: walletResult.Wallet.ID, PlayerID: playerID, ProviderID: "provider-a",
+		WalletID: walletResult.Wallet.ID(), PlayerID: playerID, ProviderID: "provider-a",
 		ExternalTransactionID: externalID, IdempotencyKey: key, RoundID: "round-cross",
 		GameID: "game-cross", Kind: domain.TransactionBet,
-		Amount: domain.Money{Units: 1_000, Currency: "BRL"}, CorrelationID: "http-correlation",
+		Amount: testMoney(1_000, "BRL"), CorrelationID: "http-correlation",
 	}
 	processor := application.NewProcessWagerService(store, ids)
 	api := httpadapter.NewHandler(
@@ -81,7 +81,7 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 	)
 	body, err := json.Marshal(map[string]any{
 		"providerId": "provider-a", "externalTransactionId": externalID, "playerId": playerID,
-		"walletId": walletResult.Wallet.ID, "roundId": "round-cross", "gameId": "game-cross",
+		"walletId": walletResult.Wallet.ID(), "roundId": "round-cross", "gameId": "game-cross",
 		"kind": "BET", "money": map[string]string{"amount": "10.00", "currency": "BRL"},
 	})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 
 	envelope := wagerEnvelope{MessageID: messageID, Type: "WagerTransactionRequested", OccurredAt: time.Now().UTC()}
 	envelope.Data.ProviderID, envelope.Data.ExternalTransactionID = command.ProviderID, command.ExternalTransactionID
-	envelope.Data.IdempotencyKey, envelope.Data.PlayerID, envelope.Data.WalletID = key, playerID, walletResult.Wallet.ID
+	envelope.Data.IdempotencyKey, envelope.Data.PlayerID, envelope.Data.WalletID = key, playerID, walletResult.Wallet.ID()
 	envelope.Data.RoundID, envelope.Data.GameID, envelope.Data.Kind = command.RoundID, command.GameID, string(command.Kind)
 	envelope.Data.Money.Amount, envelope.Data.Money.Currency = "10.00", "BRL"
 	encoded, err := json.Marshal(envelope)
@@ -111,7 +111,7 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 	}
 	_, err = client.SendMessage(ctx, &awssqs.SendMessageInput{
 		QueueUrl: aws.String(queueURL), MessageBody: aws.String(string(encoded)),
-		MessageGroupId: aws.String(walletResult.Wallet.ID), MessageDeduplicationId: aws.String(messageID),
+		MessageGroupId: aws.String(walletResult.Wallet.ID()), MessageDeduplicationId: aws.String(messageID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -134,14 +134,14 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wallet, err := application.NewQueryService(store).Wallet(ctx, walletResult.Wallet.ID)
+	wallet, err := application.NewQueryService(store).Wallet(ctx, walletResult.Wallet.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wallet.Balance.Units != 9_000 || wallet.Version != 2 {
-		t.Fatalf("wallet after cross-transport replay = balance %d version %d; want 9000/2", wallet.Balance.Units, wallet.Version)
+	if wallet.Balance().Units() != 9_000 || wallet.Version() != 2 {
+		t.Fatalf("wallet after cross-transport replay = balance %d version %d; want 9000/2", wallet.Balance().Units(), wallet.Version())
 	}
-	page, err := application.NewQueryService(store).Ledger(ctx, wallet.ID, "", 10)
+	page, err := application.NewQueryService(store).Ledger(ctx, wallet.ID(), "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestSameOperationAcrossHTTPAndSQS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if transaction.Status != domain.TransactionProcessed || transaction.Amount.Units != command.Amount.Units {
+	if transaction.Status() != domain.TransactionProcessed || transaction.Amount().Units() != command.Amount.Units() {
 		t.Fatalf("transaction was unexpectedly changed: %+v", transaction)
 	}
 	var inboxCount int

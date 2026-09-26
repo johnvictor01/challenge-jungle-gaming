@@ -19,6 +19,7 @@ type OutboxEvent struct {
 	Version       int             `json:"version"`
 	Data          json.RawMessage `json:"data"`
 	Attempts      int             `json:"-"`
+	Failed        bool            `json:"-"`
 }
 
 type wagerProcessedData struct {
@@ -41,6 +42,19 @@ type wagerRejectedData struct {
 	FailureCode   string `json:"failureCode"`
 }
 
+type wagerFailedData struct {
+	TransactionID string `json:"transactionId"`
+	WalletID      string `json:"walletId"`
+	FailureCode   string `json:"failureCode"`
+}
+
+type wagerRetryScheduledData struct {
+	TransactionID string     `json:"transactionId"`
+	Attempt       int        `json:"attempt"`
+	Error         string     `json:"error"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt"`
+}
+
 type wagerPendingReferenceData struct {
 	TransactionID string `json:"transactionId"`
 	WalletID      string `json:"walletId"`
@@ -59,6 +73,6 @@ type walletBalanceChangedData struct {
 }
 
 func eventMoneyFrom(money domain.Money) eventMoney {
-	amount := strings.TrimSuffix(money.String(), " "+money.Currency)
-	return eventMoney{Amount: amount, Currency: money.Currency}
+	amount := strings.TrimSuffix(money.String(), " "+money.Currency())
+	return eventMoney{Amount: amount, Currency: money.Currency()}
 }

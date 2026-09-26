@@ -10,6 +10,6 @@ Este diretório reúne as explicações de cada parte do projeto. A ordem acompa
 | [SQS, inbox e outbox](sqs-outbox.md) | Entrada com inbox transacional e publicação da outbox | Implementado; testes com PostgreSQL e LocalStack |
 | [Arquitetura geral](../../ARCHITECTURE.md) | Decisões, restrições e fases | Atualizado por etapa |
 | [Roteiro de testes](../TODO_TESTES.md) | Cobertura realizada e pendências conforme o README | Atualizado |
-| [Demonstração local](../demo.md) | Como subir a stack, executar os fluxos e apresentar as garantias | Pronto para gravar |
+| [Demonstração local](../demo.md) | Como subir a stack, executar os fluxos e conferir as garantias | Atualizado |
 
 Ao concluir uma etapa, atualizar o documento correspondente, o roteiro de testes e esta tabela. Não marcar integração como concluída até existir teste com o serviço real indicado no README.

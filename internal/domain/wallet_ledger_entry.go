@@ -25,15 +25,24 @@ var (
 // WalletLedgerEntry representa uma mudança de saldo já confirmada.
 // Os valores usam Money para manter a moeda junto dos centavos.
 type WalletLedgerEntry struct {
-	ID            string
-	WalletID      string
-	TransactionID string
-	Direction     Direction
-	Amount        Money
-	BalanceBefore Money
-	BalanceAfter  Money
-	CreatedAt     time.Time
+	id            string
+	walletID      string
+	transactionID string
+	direction     Direction
+	amount        Money
+	balanceBefore Money
+	balanceAfter  Money
+	createdAt     time.Time
 }
+
+func (e *WalletLedgerEntry) ID() string { return e.id }
+func (e *WalletLedgerEntry) WalletID() string { return e.walletID }
+func (e *WalletLedgerEntry) TransactionID() string { return e.transactionID }
+func (e *WalletLedgerEntry) Direction() Direction { return e.direction }
+func (e *WalletLedgerEntry) Amount() Money { return e.amount }
+func (e *WalletLedgerEntry) BalanceBefore() Money { return e.balanceBefore }
+func (e *WalletLedgerEntry) BalanceAfter() Money { return e.balanceAfter }
+func (e *WalletLedgerEntry) CreatedAt() time.Time { return e.createdAt }
 
 // NewWalletLedgerEntry cria um lançamento e valida a conta do saldo.
 func NewWalletLedgerEntry(id, walletID, transactionID string, direction Direction, amount, balanceBefore, balanceAfter Money) (*WalletLedgerEntry, error) {
@@ -41,14 +50,8 @@ func NewWalletLedgerEntry(id, walletID, transactionID string, direction Directio
 		return nil, err
 	}
 	return &WalletLedgerEntry{
-		ID:            id,
-		WalletID:      walletID,
-		TransactionID: transactionID,
-		Direction:     direction,
-		Amount:        amount,
-		BalanceBefore: balanceBefore,
-		BalanceAfter:  balanceAfter,
-		CreatedAt:     time.Now().UTC(),
+		id: id, walletID: walletID, transactionID: transactionID, direction: direction,
+		amount: amount, balanceBefore: balanceBefore, balanceAfter: balanceAfter, createdAt: time.Now().UTC(),
 	}, nil
 }
 
@@ -61,14 +64,8 @@ func RehydrateWalletLedgerEntry(id, walletID, transactionID string, direction Di
 		return nil, ErrInvalidLedgerTimestamp
 	}
 	return &WalletLedgerEntry{
-		ID:            id,
-		WalletID:      walletID,
-		TransactionID: transactionID,
-		Direction:     direction,
-		Amount:        amount,
-		BalanceBefore: balanceBefore,
-		BalanceAfter:  balanceAfter,
-		CreatedAt:     createdAt.UTC(),
+		id: id, walletID: walletID, transactionID: transactionID, direction: direction,
+		amount: amount, balanceBefore: balanceBefore, balanceAfter: balanceAfter, createdAt: createdAt.UTC(),
 	}, nil
 }
 
@@ -79,13 +76,13 @@ func validateWalletLedgerEntry(id, walletID, transactionID string, direction Dir
 	if direction != DirectionDebit && direction != DirectionCredit {
 		return ErrInvalidLedgerDirection
 	}
-	if amount.Units <= 0 {
+	if amount.Units() <= 0 {
 		return ErrInvalidLedgerAmount
 	}
-	if !validCurrency(amount.Currency) || amount.Currency != balanceBefore.Currency || amount.Currency != balanceAfter.Currency {
+	if !validCurrency(amount.Currency()) || amount.Currency() != balanceBefore.Currency() || amount.Currency() != balanceAfter.Currency() {
 		return ErrCurrencyMismatch
 	}
-	if balanceBefore.Units < 0 || balanceAfter.Units < 0 {
+	if balanceBefore.Units() < 0 || balanceAfter.Units() < 0 {
 		return ErrNegativeBalance
 	}
 
@@ -94,7 +91,7 @@ func validateWalletLedgerEntry(id, walletID, transactionID string, direction Dir
 	if direction == DirectionCredit {
 		expected, err = balanceBefore.Add(amount)
 	} else {
-		if amount.Units > balanceBefore.Units {
+		if amount.Units() > balanceBefore.Units() {
 			return ErrInsufficientFunds
 		}
 		expected, err = balanceBefore.Subtract(amount)

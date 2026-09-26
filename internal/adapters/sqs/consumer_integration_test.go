@@ -103,7 +103,7 @@ func TestConsumerLocalStackRedeliveryDoesNotRepeatFinancialEffects(t *testing.T)
 		t.Fatal(err)
 	}
 	opened, err := application.NewOpenWalletService(store, ids).Execute(ctx, application.OpenWalletCommand{
-		PlayerID: playerID, InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+		PlayerID: playerID, InitialBalance: testMoney(10_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,13 +123,13 @@ func TestConsumerLocalStackRedeliveryDoesNotRepeatFinancialEffects(t *testing.T)
 	}
 	envelope := wagerEnvelope{MessageID: messageID, Type: "WagerTransactionRequested", OccurredAt: time.Now().UTC()}
 	envelope.Data.ProviderID, envelope.Data.ExternalTransactionID, envelope.Data.IdempotencyKey = "integration-provider", externalID, "integration-key-"+externalID
-	envelope.Data.PlayerID, envelope.Data.WalletID, envelope.Data.RoundID, envelope.Data.GameID = playerID, opened.Wallet.ID, "integration-round", "integration-game"
+	envelope.Data.PlayerID, envelope.Data.WalletID, envelope.Data.RoundID, envelope.Data.GameID = playerID, opened.Wallet.ID(), "integration-round", "integration-game"
 	envelope.Data.Kind, envelope.Data.Money.Amount, envelope.Data.Money.Currency = string(domain.TransactionBet), "25.00", "BRL"
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.SendMessage(ctx, &awssqs.SendMessageInput{QueueUrl: aws.String(queueURL), MessageBody: aws.String(string(body)), MessageGroupId: aws.String(opened.Wallet.ID), MessageDeduplicationId: aws.String(messageID)})
+	_, err = client.SendMessage(ctx, &awssqs.SendMessageInput{QueueUrl: aws.String(queueURL), MessageBody: aws.String(string(body)), MessageGroupId: aws.String(opened.Wallet.ID()), MessageDeduplicationId: aws.String(messageID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestConsumerLocalStackRedeliveryDoesNotRepeatFinancialEffects(t *testing.T)
 	}
 
 	var balance int64
-	if err := pool.QueryRow(ctx, "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID).Scan(&balance); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID()).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 7_500 {
@@ -176,7 +176,7 @@ func TestConsumerLocalStackRedeliveryDoesNotRepeatFinancialEffects(t *testing.T)
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM inbox_messages WHERE consumer_name=$1 AND message_id=$2", "wager-api-integration", messageID).Scan(&inboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id=$1", opened.Wallet.ID).Scan(&ledgerCount); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id=$1", opened.Wallet.ID()).Scan(&ledgerCount); err != nil {
 		t.Fatal(err)
 	}
 	if inboxCount != 1 || ledgerCount != 2 {

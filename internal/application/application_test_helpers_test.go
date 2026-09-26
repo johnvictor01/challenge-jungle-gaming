@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
@@ -52,24 +53,58 @@ func cloneMemoryState(source *memoryState) *memoryState {
 }
 
 func cloneTransaction(transaction *domain.WagerTransaction) *domain.WagerTransaction {
-	copy := *transaction
-	if transaction.ResultBalance != nil {
-		balance := *transaction.ResultBalance
-		copy.ResultBalance = &balance
-	}
-	if transaction.ProcessedAt != nil {
-		processedAt := *transaction.ProcessedAt
-		copy.ProcessedAt = &processedAt
-	}
-	if transaction.NextAttemptAt != nil {
-		nextAttemptAt := *transaction.NextAttemptAt
-		copy.NextAttemptAt = &nextAttemptAt
-	}
-	return &copy
+	return transaction.Clone()
 }
+
+func rehydratedTransaction(state domain.WagerTransactionState) *domain.WagerTransaction {
+	transaction, err := domain.RehydrateWagerTransaction(state)
+	if err != nil {
+		panic(err)
+	}
+	return transaction
+}
+
+func processedExternalTransaction(wallet *domain.Wallet, id, externalID string, kind domain.TransactionKind, amount int64, reference string) *domain.WagerTransaction {
+	tx, err := domain.NewExternalWagerTransaction(domain.ExternalWagerInput{
+		ID: id, Wallet: wallet, ProviderID: "provider-1", ExternalTransactionID: externalID, IdempotencyKey: "idem-" + id,
+		PayloadHash: strings.Repeat("a", 64), Kind: kind, Amount: testMoney(amount, wallet.Currency()), RoundID: "round-1", GameID: "game-1",
+		ReferenceExternalTransactionID: reference,
+	})
+	if err != nil {
+		panic(err)
+	}
+	if kind == domain.TransactionRefund || kind == domain.TransactionRollback || (kind == domain.TransactionWin && reference != "") {
+		// A processed fixture with a reference is rehydrated with its resolved IDs below.
+		state := tx.State()
+		state.ReferenceTransactionID = "bet-id"
+		state.Status = domain.TransactionProcessed
+		now := time.Now().UTC()
+		state.ProcessedAt = &now
+		state.ResultBalance = moneyPointer(wallet.Balance())
+		processed, err := domain.RehydrateWagerTransaction(state)
+		if err != nil {
+			panic(err)
+		}
+		return processed
+	}
+	if err := tx.MarkProcessed(wallet.Balance()); err != nil {
+		panic(err)
+	}
+	return tx
+}
+
+func moneyPointer(value domain.Money) *domain.Money { copy := value; return &copy }
 
 type memoryUnitOfWork struct {
 	state *memoryState
+}
+
+func testMoney(units int64, currency string) domain.Money {
+	money, err := domain.NewMoney(units, currency)
+	if err != nil {
+		panic(err)
+	}
+	return money
 }
 
 func (u *memoryUnitOfWork) WithinTransaction(ctx context.Context, callback func(Repositories) error) error {
@@ -120,7 +155,7 @@ func (r memoryWalletRepository) FindByID(_ context.Context, id string) (*domain.
 
 func (r memoryWalletRepository) FindByPlayerAndCurrency(_ context.Context, playerID, currency string) (*domain.Wallet, error) {
 	for _, wallet := range r.state.wallets {
-		if wallet.PlayerID == playerID && wallet.Currency == currency {
+		if wallet.PlayerID() == playerID && wallet.Currency() == currency {
 			copy := *wallet
 			return &copy, nil
 		}
@@ -133,12 +168,12 @@ func (r memoryWalletRepository) Create(_ context.Context, wallet *domain.Wallet)
 		return errors.New("injected wallet create failure")
 	}
 	for _, existing := range r.state.wallets {
-		if existing.PlayerID == wallet.PlayerID && existing.Currency == wallet.Currency {
+		if existing.PlayerID() == wallet.PlayerID() && existing.Currency() == wallet.Currency() {
 			return ErrPersistenceConflict
 		}
 	}
 	copy := *wallet
-	r.state.wallets[wallet.ID] = &copy
+	r.state.wallets[wallet.ID()] = &copy
 	return nil
 }
 
@@ -146,15 +181,15 @@ func (r memoryWalletRepository) Update(_ context.Context, wallet *domain.Wallet,
 	if r.state.failOn == "wallet_update" {
 		return errors.New("injected wallet update failure")
 	}
-	current := r.state.wallets[wallet.ID]
+	current := r.state.wallets[wallet.ID()]
 	if current == nil {
 		return ErrNotFound
 	}
-	if current.Version != expectedVersion {
+	if current.Version() != expectedVersion {
 		return ErrPersistenceConflict
 	}
 	copy := *wallet
-	r.state.wallets[wallet.ID] = &copy
+	r.state.wallets[wallet.ID()] = &copy
 	return nil
 }
 
@@ -174,7 +209,7 @@ func (r memoryTransactionRepository) FindByIDForUpdate(ctx context.Context, id s
 
 func (r memoryTransactionRepository) FindByIdempotencyKey(_ context.Context, providerID, key string) (*domain.WagerTransaction, error) {
 	for _, transaction := range r.state.transactions {
-		if transaction.ProviderID == providerID && transaction.IdempotencyKey == key && transaction.Origin == domain.TransactionExternal {
+		if transaction.ProviderID() == providerID && transaction.IdempotencyKey() == key && transaction.Origin() == domain.TransactionExternal {
 			return cloneTransaction(transaction), nil
 		}
 	}
@@ -183,7 +218,7 @@ func (r memoryTransactionRepository) FindByIdempotencyKey(_ context.Context, pro
 
 func (r memoryTransactionRepository) FindByExternalID(_ context.Context, providerID, externalID string) (*domain.WagerTransaction, error) {
 	for _, transaction := range r.state.transactions {
-		if transaction.ProviderID == providerID && transaction.ExternalTransactionID == externalID && transaction.Origin == domain.TransactionExternal {
+		if transaction.ProviderID() == providerID && transaction.ExternalTransactionID() == externalID && transaction.Origin() == domain.TransactionExternal {
 			return cloneTransaction(transaction), nil
 		}
 	}
@@ -192,8 +227,8 @@ func (r memoryTransactionRepository) FindByExternalID(_ context.Context, provide
 
 func (r memoryTransactionRepository) FindSuccessfulReversal(_ context.Context, referenceTransactionID string) (*domain.WagerTransaction, error) {
 	for _, transaction := range r.state.transactions {
-		if transaction.Status == domain.TransactionProcessed && transaction.ReferenceTransactionID == referenceTransactionID &&
-			(transaction.Kind == domain.TransactionRefund || transaction.Kind == domain.TransactionRollback) {
+		if transaction.Status() == domain.TransactionProcessed && transaction.ReferenceTransactionID() == referenceTransactionID &&
+			(transaction.Kind() == domain.TransactionRefund || transaction.Kind() == domain.TransactionRollback) {
 			return cloneTransaction(transaction), nil
 		}
 	}
@@ -204,28 +239,28 @@ func (r memoryTransactionRepository) Create(_ context.Context, transaction *doma
 	if r.state.failOn == "transaction_create" {
 		return errors.New("injected transaction create failure")
 	}
-	if _, exists := r.state.transactions[transaction.ID]; exists {
+	if _, exists := r.state.transactions[transaction.ID()]; exists {
 		return ErrPersistenceConflict
 	}
 	for _, existing := range r.state.transactions {
-		if transaction.Origin == domain.TransactionExternal && existing.Origin == domain.TransactionExternal &&
-			((existing.ProviderID == transaction.ProviderID && existing.IdempotencyKey == transaction.IdempotencyKey) ||
-				(existing.ProviderID == transaction.ProviderID && existing.ExternalTransactionID == transaction.ExternalTransactionID)) {
+		if transaction.Origin() == domain.TransactionExternal && existing.Origin() == domain.TransactionExternal &&
+			((existing.ProviderID() == transaction.ProviderID() && existing.IdempotencyKey() == transaction.IdempotencyKey()) ||
+				(existing.ProviderID() == transaction.ProviderID() && existing.ExternalTransactionID() == transaction.ExternalTransactionID())) {
 			return ErrPersistenceConflict
 		}
-		if transaction.Kind == domain.TransactionOpening && existing.WalletID == transaction.WalletID && existing.Kind == domain.TransactionOpening {
+		if transaction.Kind() == domain.TransactionOpening && existing.WalletID() == transaction.WalletID() && existing.Kind() == domain.TransactionOpening {
 			return ErrPersistenceConflict
 		}
 	}
-	r.state.transactions[transaction.ID] = cloneTransaction(transaction)
+	r.state.transactions[transaction.ID()] = cloneTransaction(transaction)
 	return nil
 }
 
 func (r memoryTransactionRepository) Update(_ context.Context, transaction *domain.WagerTransaction) error {
-	if _, exists := r.state.transactions[transaction.ID]; !exists {
+	if _, exists := r.state.transactions[transaction.ID()]; !exists {
 		return ErrNotFound
 	}
-	r.state.transactions[transaction.ID] = cloneTransaction(transaction)
+	r.state.transactions[transaction.ID()] = cloneTransaction(transaction)
 	return nil
 }
 
@@ -243,20 +278,20 @@ func (r memoryLedgerRepository) Create(_ context.Context, entry *domain.WalletLe
 func (r memoryLedgerRepository) ListByWallet(_ context.Context, walletID string, afterCreatedAt *time.Time, afterID string, limit int) ([]*domain.WalletLedgerEntry, error) {
 	entries := make([]*domain.WalletLedgerEntry, 0)
 	for _, entry := range r.state.ledger {
-		if entry.WalletID != walletID {
+		if entry.WalletID() != walletID {
 			continue
 		}
-		if afterCreatedAt != nil && !(entry.CreatedAt.After(*afterCreatedAt) || (entry.CreatedAt.Equal(*afterCreatedAt) && entry.ID > afterID)) {
+		if afterCreatedAt != nil && !(entry.CreatedAt().After(*afterCreatedAt) || (entry.CreatedAt().Equal(*afterCreatedAt) && entry.ID() > afterID)) {
 			continue
 		}
 		copy := *entry
 		entries = append(entries, &copy)
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
-			return entries[i].ID < entries[j].ID
+		if entries[i].CreatedAt().Equal(entries[j].CreatedAt()) {
+			return entries[i].ID() < entries[j].ID()
 		}
-		return entries[i].CreatedAt.Before(entries[j].CreatedAt)
+		return entries[i].CreatedAt().Before(entries[j].CreatedAt())
 	})
 	if len(entries) > limit {
 		entries = entries[:limit]
@@ -267,20 +302,20 @@ func (r memoryLedgerRepository) ListByWallet(_ context.Context, walletID string,
 func (r memoryLedgerRepository) SummarizeByWallet(_ context.Context, walletID string) (LedgerSummary, error) {
 	var summary LedgerSummary
 	for _, entry := range r.state.ledger {
-		if entry.WalletID != walletID {
+		if entry.WalletID() != walletID {
 			continue
 		}
 		summary.Count++
-		if entry.Direction == domain.DirectionCredit {
-			if entry.Amount.Units > int64(^uint64(0)>>1)-summary.Credits {
+		if entry.Direction() == domain.DirectionCredit {
+			if entry.Amount().Units() > int64(^uint64(0)>>1)-summary.Credits {
 				return LedgerSummary{}, domain.ErrOverflow
 			}
-			summary.Credits += entry.Amount.Units
+			summary.Credits += entry.Amount().Units()
 		} else {
-			if entry.Amount.Units > int64(^uint64(0)>>1)-summary.Debits {
+			if entry.Amount().Units() > int64(^uint64(0)>>1)-summary.Debits {
 				return LedgerSummary{}, domain.ErrOverflow
 			}
-			summary.Debits += entry.Amount.Units
+			summary.Debits += entry.Amount().Units()
 		}
 	}
 	return summary, nil
@@ -342,7 +377,7 @@ func seedMemoryWallet(t testFataler, state *memoryState, balance int64) *domain.
 	if err != nil {
 		t.Fatalf("create wallet: %v", err)
 	}
-	state.wallets[wallet.ID] = wallet
+	state.wallets[wallet.ID()] = wallet
 	return wallet
 }
 

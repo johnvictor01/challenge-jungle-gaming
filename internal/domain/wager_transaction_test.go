@@ -24,7 +24,7 @@ func externalTransactionInput(wallet *Wallet, kind TransactionKind, amount int64
 		IdempotencyKey:        "idem-1",
 		PayloadHash:           strings.Repeat("a", 64),
 		Kind:                  kind,
-		Amount:                Money{Units: amount, Currency: "BRL"},
+		Amount:                Money{units: amount, currency: "BRL"},
 		RoundID:               "round-1",
 		GameID:                "game-1",
 	}
@@ -53,16 +53,16 @@ func TestNewExternalWagerTransaction(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewExternalWagerTransaction retornou erro: %v", err)
 			}
-			if transaction.Origin != TransactionExternal || transaction.Status != TransactionPending {
+			if transaction.origin != TransactionExternal || transaction.status != TransactionPending {
 				t.Errorf("origem ou estado inicial incorreto: %+v", transaction)
 			}
-			if transaction.WalletID != wallet.ID || transaction.PlayerID != wallet.PlayerID || transaction.Currency != wallet.Currency {
+			if transaction.walletID != wallet.ID() || transaction.playerID != wallet.PlayerID() || transaction.currency != wallet.Currency() {
 				t.Errorf("vínculo com a carteira incorreto: %+v", transaction)
 			}
-			if transaction.Amount.Units != tc.amount || transaction.Amount.Currency != "BRL" {
-				t.Errorf("valor da operação incorreto: %+v", transaction.Amount)
+			if transaction.amount.Units() != tc.amount || transaction.amount.Currency() != "BRL" {
+				t.Errorf("valor da operação incorreto: %+v", transaction.amount)
 			}
-			if transaction.CreatedAt.IsZero() || transaction.UpdatedAt.IsZero() {
+			if transaction.createdAt.IsZero() || transaction.updatedAt.IsZero() {
 				t.Error("datas da transação não foram preenchidas")
 			}
 		})
@@ -106,18 +106,18 @@ func TestExternalTransactionAmountRules(t *testing.T) {
 		amount    Money
 		wantError error
 	}{
-		{"BET positivo", TransactionBet, Money{Units: 100, Currency: "BRL"}, nil},
-		{"BET zero", TransactionBet, Money{Units: 0, Currency: "BRL"}, ErrInvalidTransactionAmount},
-		{"WIN zero", TransactionWin, Money{Units: 0, Currency: "BRL"}, ErrInvalidTransactionAmount},
-		{"LOSS zero", TransactionLoss, Money{Units: 0, Currency: "BRL"}, nil},
-		{"LOSS positivo", TransactionLoss, Money{Units: 1, Currency: "BRL"}, ErrInvalidTransactionAmount},
-		{"REFUND zero", TransactionRefund, Money{Units: 0, Currency: "BRL"}, ErrInvalidTransactionAmount},
-		{"ROLLBACK negativo", TransactionRollback, Money{Units: -1, Currency: "BRL"}, ErrInvalidTransactionAmount},
-		{"moeda diferente", TransactionBet, Money{Units: 100, Currency: "USD"}, ErrTransactionCurrency},
+		{"BET positivo", TransactionBet, Money{units: 100, currency: "BRL"}, nil},
+		{"BET zero", TransactionBet, Money{units: 0, currency: "BRL"}, ErrInvalidTransactionAmount},
+		{"WIN zero", TransactionWin, Money{units: 0, currency: "BRL"}, ErrInvalidTransactionAmount},
+		{"LOSS zero", TransactionLoss, Money{units: 0, currency: "BRL"}, nil},
+		{"LOSS positivo", TransactionLoss, Money{units: 1, currency: "BRL"}, ErrInvalidTransactionAmount},
+		{"REFUND zero", TransactionRefund, Money{units: 0, currency: "BRL"}, ErrInvalidTransactionAmount},
+		{"ROLLBACK negativo", TransactionRollback, Money{units: -1, currency: "BRL"}, ErrInvalidTransactionAmount},
+		{"moeda diferente", TransactionBet, Money{units: 100, currency: "USD"}, ErrTransactionCurrency},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			input := externalTransactionInput(walletForTransaction(t, 1000), tc.kind, tc.amount.Units)
+			input := externalTransactionInput(walletForTransaction(t, 1000), tc.kind, tc.amount.Units())
 			input.Amount = tc.amount
 			_, err := NewExternalWagerTransaction(input)
 			if tc.wantError == nil {
@@ -161,20 +161,20 @@ func TestExternalTransactionReferenceRules(t *testing.T) {
 // TestNewOpeningWagerTransaction cria OPENING apenas para saldo inicial positivo.
 func TestNewOpeningWagerTransaction(t *testing.T) {
 	wallet := walletForTransaction(t, 2500)
-	transaction, err := NewOpeningWagerTransaction("opening-1", wallet, Money{Units: 2500, Currency: "BRL"})
+	transaction, err := NewOpeningWagerTransaction("opening-1", wallet, Money{units: 2500, currency: "BRL"})
 	if err != nil {
 		t.Fatalf("NewOpeningWagerTransaction retornou erro: %v", err)
 	}
-	if transaction.Origin != TransactionInternal || transaction.Kind != TransactionOpening || transaction.Status != TransactionProcessed {
+	if transaction.origin != TransactionInternal || transaction.kind != TransactionOpening || transaction.status != TransactionProcessed {
 		t.Errorf("OPENING deveria ser interna e processada: %+v", transaction)
 	}
-	if transaction.WalletID != wallet.ID || transaction.PlayerID != wallet.PlayerID || transaction.Amount.Units != 2500 {
+	if transaction.walletID != wallet.ID() || transaction.playerID != wallet.PlayerID() || transaction.amount.Units() != 2500 {
 		t.Errorf("metadados da abertura incorretos: %+v", transaction)
 	}
-	if transaction.ProviderID != "" || transaction.ExternalTransactionID != "" || transaction.IdempotencyKey != "" || transaction.PayloadHash != "" || transaction.RoundID != "" || transaction.GameID != "" {
+	if transaction.providerID != "" || transaction.externalTransactionID != "" || transaction.idempotencyKey != "" || transaction.payloadHash != "" || transaction.roundID != "" || transaction.gameID != "" {
 		t.Errorf("OPENING não deve ter metadados externos: %+v", transaction)
 	}
-	if transaction.ProcessedAt == nil || transaction.ResultBalance == nil || transaction.ResultBalance.Units != 2500 {
+	if transaction.processedAt == nil || transaction.resultBalance == nil || transaction.resultBalance.Units() != 2500 {
 		t.Errorf("resultado da abertura não foi preenchido: %+v", transaction)
 	}
 }
@@ -182,16 +182,16 @@ func TestNewOpeningWagerTransaction(t *testing.T) {
 // TestNewOpeningWagerTransactionRejectsZeroAndInvalidData impede abertura incoerente.
 func TestNewOpeningWagerTransactionRejectsZeroAndInvalidData(t *testing.T) {
 	wallet := walletForTransaction(t, 0)
-	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{Units: 0, Currency: "BRL"}); !errors.Is(err, ErrInvalidTransactionAmount) {
+	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{units: 0, currency: "BRL"}); !errors.Is(err, ErrInvalidTransactionAmount) {
 		t.Errorf("saldo zero não deve criar OPENING, recebeu %v", err)
 	}
-	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{Units: 10, Currency: "USD"}); !errors.Is(err, ErrTransactionCurrency) {
+	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{units: 10, currency: "USD"}); !errors.Is(err, ErrTransactionCurrency) {
 		t.Errorf("esperava moeda incompatível, recebeu %v", err)
 	}
-	if _, err := NewOpeningWagerTransaction("", wallet, Money{Units: 10, Currency: "BRL"}); !errors.Is(err, ErrInvalidTransaction) {
+	if _, err := NewOpeningWagerTransaction("", wallet, Money{units: 10, currency: "BRL"}); !errors.Is(err, ErrInvalidTransaction) {
 		t.Errorf("esperava transação inválida, recebeu %v", err)
 	}
-	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{Units: 10, Currency: "BRL"}); !errors.Is(err, ErrInvalidTransaction) {
+	if _, err := NewOpeningWagerTransaction("opening-1", wallet, Money{units: 10, currency: "BRL"}); !errors.Is(err, ErrInvalidTransaction) {
 		t.Errorf("valor de OPENING precisa corresponder ao saldo inicial, recebeu %v", err)
 	}
 }
@@ -207,28 +207,28 @@ func TestWagerTransactionStateTransitions(t *testing.T) {
 	if err := transaction.WaitForReference(); err != nil {
 		t.Fatalf("WaitForReference retornou erro: %v", err)
 	}
-	if transaction.Status != TransactionPendingReference {
-		t.Fatalf("estado esperado PENDING_REFERENCE, recebido %s", transaction.Status)
+	if transaction.status != TransactionPendingReference {
+		t.Fatalf("estado esperado PENDING_REFERENCE, recebido %s", transaction.status)
 	}
-	if err := transaction.MarkProcessed(Money{Units: 900, Currency: "BRL"}); !errors.Is(err, ErrInvalidTransactionState) {
+	if err := transaction.MarkProcessed(Money{units: 900, currency: "BRL"}); !errors.Is(err, ErrInvalidTransactionState) {
 		t.Fatalf("não deveria processar sem resolver referência, recebeu %v", err)
 	}
 	bet := WagerTransaction{
-		ID: "bet-internal-1", Origin: TransactionExternal, WalletID: wallet.ID,
-		PlayerID: wallet.PlayerID, Currency: "BRL", ProviderID: "provider-1",
-		ExternalTransactionID: "bet-external-1", Kind: TransactionBet,
-		Amount: Money{Units: 100, Currency: "BRL"}, RoundID: "round-1", Status: TransactionProcessed,
+		id: "bet-internal-1", origin: TransactionExternal, walletID: wallet.ID(),
+		playerID: wallet.PlayerID(), currency: "BRL", providerID: "provider-1",
+		externalTransactionID: "bet-external-1", kind: TransactionBet,
+		amount: Money{units: 100, currency: "BRL"}, roundID: "round-1", status: TransactionProcessed,
 	}
 	if err := transaction.ResumeAfterReference(bet); err != nil {
 		t.Fatalf("ResumeAfterReference retornou erro: %v", err)
 	}
-	if transaction.Status != TransactionPending || transaction.ReferenceTransactionID != bet.ID {
+	if transaction.status != TransactionPending || transaction.referenceTransactionID != bet.id {
 		t.Errorf("referência não foi resolvida: %+v", transaction)
 	}
-	if err := transaction.MarkProcessed(Money{Units: 900, Currency: "BRL"}); err != nil {
+	if err := transaction.MarkProcessed(Money{units: 900, currency: "BRL"}); err != nil {
 		t.Fatalf("MarkProcessed retornou erro: %v", err)
 	}
-	if transaction.Status != TransactionProcessed || transaction.ProcessedAt == nil || transaction.ResultBalance == nil {
+	if transaction.status != TransactionProcessed || transaction.processedAt == nil || transaction.resultBalance == nil {
 		t.Errorf("transação não foi concluída corretamente: %+v", transaction)
 	}
 	if err := transaction.Reject("late-reject"); !errors.Is(err, ErrTerminalTransaction) {
@@ -248,15 +248,15 @@ func TestWagerTransactionRejectsInvalidReference(t *testing.T) {
 	}
 	otherWallet := walletForTransaction(t, 1000)
 	reference := WagerTransaction{
-		ID: "bet-internal-1", Origin: TransactionExternal, WalletID: otherWallet.ID,
-		PlayerID: wallet.PlayerID, Currency: "BRL", ProviderID: "provider-1",
-		ExternalTransactionID: "bet-external-1", Kind: TransactionBet,
-		Amount: Money{Units: 100, Currency: "BRL"}, RoundID: "round-1", Status: TransactionProcessed,
+		id: "bet-internal-1", origin: TransactionExternal, walletID: otherWallet.ID(),
+		playerID: wallet.PlayerID(), currency: "BRL", providerID: "provider-1",
+		externalTransactionID: "bet-external-1", kind: TransactionBet,
+		amount: Money{units: 100, currency: "BRL"}, roundID: "round-1", status: TransactionProcessed,
 	}
 	if err := transaction.ResumeAfterReference(reference); !errors.Is(err, ErrInvalidReference) {
 		t.Errorf("esperava ErrInvalidReference, recebeu %v", err)
 	}
-	if transaction.Status != TransactionPendingReference || transaction.ReferenceTransactionID != "" {
+	if transaction.status != TransactionPendingReference || transaction.referenceTransactionID != "" {
 		t.Errorf("transação mudou após referência recusada: %+v", transaction)
 	}
 }
@@ -276,10 +276,10 @@ func TestWagerTransactionRejectAndFail(t *testing.T) {
 			if err := finish.method(transaction, "RULE_ERROR"); err != nil {
 				t.Fatalf("finalização retornou erro: %v", err)
 			}
-			if transaction.Status != finish.status || transaction.FailureCode != "RULE_ERROR" || transaction.ProcessedAt == nil {
+			if transaction.status != finish.status || transaction.failureCode != "RULE_ERROR" || transaction.processedAt == nil {
 				t.Errorf("finalização incorreta: %+v", transaction)
 			}
-			if err := transaction.MarkProcessed(Money{Units: 1000, Currency: "BRL"}); !errors.Is(err, ErrTerminalTransaction) {
+			if err := transaction.MarkProcessed(Money{units: 1000, currency: "BRL"}); !errors.Is(err, ErrTerminalTransaction) {
 				t.Errorf("transação terminal deveria ser imutável, recebeu %v", err)
 			}
 		})
@@ -298,7 +298,7 @@ func TestWagerTransactionCanRejectPendingReference(t *testing.T) {
 	if err := transaction.Reject("REFERENCE_EXPIRED"); err != nil {
 		t.Fatalf("Reject retornou erro: %v", err)
 	}
-	if transaction.Status != TransactionRejected || transaction.FailureCode != "REFERENCE_EXPIRED" {
+	if transaction.status != TransactionRejected || transaction.failureCode != "REFERENCE_EXPIRED" {
 		t.Errorf("pendência não foi rejeitada: %+v", transaction)
 	}
 }
@@ -312,8 +312,8 @@ func TestWagerTransactionRejectsEmptyFailureCode(t *testing.T) {
 	if err := transaction.Reject(" "); !errors.Is(err, ErrInvalidTransactionState) {
 		t.Errorf("esperava erro de estado para código vazio, recebeu %v", err)
 	}
-	if transaction.Status != TransactionPending {
-		t.Errorf("transação mudou após código inválido: %s", transaction.Status)
+	if transaction.status != TransactionPending {
+		t.Errorf("transação mudou após código inválido: %s", transaction.status)
 	}
 }
 
@@ -323,13 +323,13 @@ func TestWagerTransactionRejectsInvalidProcessedBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := transaction.MarkProcessed(Money{Units: -1, Currency: "BRL"}); !errors.Is(err, ErrNegativeBalance) {
+	if err := transaction.MarkProcessed(Money{units: -1, currency: "BRL"}); !errors.Is(err, ErrNegativeBalance) {
 		t.Errorf("esperava ErrNegativeBalance, recebeu %v", err)
 	}
-	if err := transaction.MarkProcessed(Money{Units: 900, Currency: "USD"}); !errors.Is(err, ErrTransactionCurrency) {
+	if err := transaction.MarkProcessed(Money{units: 900, currency: "USD"}); !errors.Is(err, ErrTransactionCurrency) {
 		t.Errorf("esperava ErrTransactionCurrency, recebeu %v", err)
 	}
-	if transaction.Status != TransactionPending {
-		t.Errorf("transação mudou após resultado inválido: %s", transaction.Status)
+	if transaction.status != TransactionPending {
+		t.Errorf("transação mudou após resultado inválido: %s", transaction.status)
 	}
 }

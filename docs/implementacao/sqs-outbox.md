@@ -8,7 +8,7 @@ O consumidor valida envelope e payload, usa `data.idempotencyKey` e calcula o me
 
 ## Publicação pela outbox — implementado
 
-O publisher reivindica eventos em lotes com `FOR UPDATE SKIP LOCKED` e lease de 30 segundos. O envio à rede acontece fora da transação SQL. Depois de publicar, marca o evento como publicado; se houver interrupção entre envio e marcação, ele será publicado de novo com o mesmo `eventId`. Falhas incrementam tentativas e agendam backoff exponencial de 1 a 60 segundos. Falhas permanentes e DLQ ainda não têm política própria; o dispatcher continuará tentando.
+O publisher reivindica eventos em lotes com `FOR UPDATE SKIP LOCKED` e lease de 30 segundos. O envio à rede acontece fora da transação SQL. Depois de publicar, marca o evento como publicado; se houver interrupção entre envio e marcação, ele será publicado de novo com o mesmo `eventId`. Falhas incrementam tentativas e agendam backoff exponencial de 1 a 60 segundos. Após dez tentativas, o evento recebe estado terminal de falha e deixa de ser reivindicado; eventos posteriores do agregado podem avançar.
 
 Cada grupo FIFO usa o `aggregateId` como `MessageGroupId`, para que eventos da mesma carteira mantenham ordem e carteiras diferentes avancem em paralelo. O `eventId` vira `MessageDeduplicationId`.
 
@@ -39,11 +39,13 @@ AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
 go test -race ./internal/adapters/postgres ./internal/adapters/sqs -count=1
 ```
 
-## Pendências de implementação
+## Implementação
 
 - [x] Publisher SQS com LocalStack e fila FIFO provisionada localmente.
 - [x] Repositório inbox e integração no `UnitOfWork`.
 - [x] Reivindicação concorrente, lease, backoff e confirmação da outbox.
 - [x] Política local de DLQ e visibility timeout.
 - [x] Provisionamento automático da fila local.
+- [x] Limite terminal de dez tentativas para publicação da outbox.
 - [x] Testes reais de reentrega, interrupção, recuperação, claims concorrentes e DLQ.
+- [x] Falhas técnicas repetidas ao resolver referência são contadas de forma persistente; a operação termina em `FAILED` com `REFERENCE_RESOLUTION_FAILED` e evento outbox.

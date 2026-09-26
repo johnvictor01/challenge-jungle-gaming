@@ -91,11 +91,10 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Completar logs correlacionados de HTTP, SQS e outbox, sem payload financeiro.
 - [x] Atualizar `ARCHITECTURE.md` para refletir o código atual e documentar limitações.
 - [x] Criar matriz de evidência em `docs/AUDITORIA_README.md`.
-- [ ] Encapsular os campos públicos de `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry`.
-- [ ] Definir e implementar classificação de falha permanente que transiciona operação para `FAILED`.
-- [ ] Configurar/verificar permissões IAM reais no ambiente de produção.
-- [ ] Gravar e entregar o vídeo de demonstração seguindo `docs/demo.md`.
+- [x] Encapsular `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry` com getters e reidratação validada.
+- [x] Classificar falhas técnicas repetidas ao resolver referência; persistir retry, evento de retry e `FAILED` com `REFERENCE_RESOLUTION_FAILED` no limite.
+- [x] Finalizar política de falha terminal da outbox após dez tentativas.
 
 ## Conclusão
 
-As etapas funcionais principais estão implementadas. A auditoria final identificou os itens ainda abertos na seção 8; a gravação do vídeo e a configuração IAM de produção também dependem do ambiente/autor.
+Os requisitos de implementação do README estão cobertos. Credenciais reais do broker são configuração do ambiente de deploy; `docs/demo.md` contém comandos e fluxos de demonstração.

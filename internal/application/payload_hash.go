@@ -29,7 +29,7 @@ type canonicalMoney struct {
 // CanonicalPayloadHash calcula SHA-256 do conjunto estável de campos do negócio.
 // HTTP e SQS devem chamar esta mesma função depois de normalizar a entrada.
 func CanonicalPayloadHash(command ProcessWagerCommand) (string, error) {
-	amount := strings.TrimSuffix(command.Amount.String(), " "+command.Amount.Currency)
+	amount := strings.TrimSuffix(command.Amount.String(), " "+command.Amount.Currency())
 	payload := canonicalWagerPayload{
 		ProviderID:            command.ProviderID,
 		ExternalTransactionID: command.ExternalTransactionID,
@@ -38,7 +38,7 @@ func CanonicalPayloadHash(command ProcessWagerCommand) (string, error) {
 		RoundID:               command.RoundID,
 		GameID:                command.GameID,
 		Kind:                  string(command.Kind),
-		Money:                 canonicalMoney{Amount: amount, Currency: command.Amount.Currency},
+		Money:                 canonicalMoney{Amount: amount, Currency: command.Amount.Currency()},
 		ReferenceExternalID:   command.ReferenceExternalTransactionID,
 	}
 	encoded, err := json.Marshal(payload)

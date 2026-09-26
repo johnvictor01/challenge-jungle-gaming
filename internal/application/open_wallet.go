@@ -38,7 +38,7 @@ func (s *OpenWalletService) Execute(ctx context.Context, command OpenWalletComma
 	}
 	var result OpenWalletResult
 	err := s.uow.WithinTransaction(ctx, func(repositories Repositories) error {
-		wallet, err := repositories.Wallets.FindByPlayerAndCurrency(ctx, command.PlayerID, command.InitialBalance.Currency)
+		wallet, err := repositories.Wallets.FindByPlayerAndCurrency(ctx, command.PlayerID, command.InitialBalance.Currency())
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
@@ -46,7 +46,7 @@ func (s *OpenWalletService) Execute(ctx context.Context, command OpenWalletComma
 			return ErrWalletAlreadyExists
 		}
 
-		wallet, err = domain.NewWallet(command.PlayerID, command.InitialBalance.Currency, command.InitialBalance.Units)
+		wallet, err = domain.NewWallet(command.PlayerID, command.InitialBalance.Currency(), command.InitialBalance.Units())
 		if err != nil {
 			return err
 		}
@@ -59,10 +59,10 @@ func (s *OpenWalletService) Execute(ctx context.Context, command OpenWalletComma
 		result.Wallet = wallet
 		correlationID := command.CorrelationID
 		if correlationID == "" {
-			correlationID = wallet.ID
+			correlationID = wallet.ID()
 		}
 
-		if command.InitialBalance.Units == 0 {
+		if command.InitialBalance.Units() == 0 {
 			return nil
 		}
 		openingID, err := s.ids.NewID()
@@ -80,8 +80,12 @@ func (s *OpenWalletService) Execute(ctx context.Context, command OpenWalletComma
 		if err != nil {
 			return err
 		}
-		ledger, err := domain.NewWalletLedgerEntry(ledgerID, wallet.ID, opening.ID, domain.DirectionCredit,
-			command.InitialBalance, domain.Money{Currency: wallet.Currency}, wallet.Balance)
+		zero, err := domain.NewMoney(0, wallet.Currency())
+		if err != nil {
+			return err
+		}
+		ledger, err := domain.NewWalletLedgerEntry(ledgerID, wallet.ID(), opening.ID(), domain.DirectionCredit,
+			command.InitialBalance, zero, wallet.Balance())
 		if err != nil {
 			return err
 		}
@@ -102,24 +106,24 @@ func (s *OpenWalletService) Execute(ctx context.Context, command OpenWalletComma
 
 func (s *OpenWalletService) appendOpeningEvents(ctx context.Context, repositories Repositories, opening *domain.WagerTransaction, ledger *domain.WalletLedgerEntry, correlationID string) error {
 	processedPayload, err := json.Marshal(wagerProcessedData{
-		TransactionID: opening.ID, WalletID: opening.WalletID, Kind: string(opening.Kind),
-		Status: string(opening.Status), Balance: eventMoneyFrom(opening.Amount),
+		TransactionID: opening.ID(), WalletID: opening.WalletID(), Kind: string(opening.Kind()),
+		Status: string(opening.Status()), Balance: eventMoneyFrom(opening.Amount()),
 	})
 	if err != nil {
 		return err
 	}
-	if err := s.appendEvent(ctx, repositories, "WagerTransactionProcessed", opening.WalletID, opening.ID, correlationID, json.RawMessage(processedPayload)); err != nil {
+	if err := s.appendEvent(ctx, repositories, "WagerTransactionProcessed", opening.WalletID(), opening.ID(), correlationID, json.RawMessage(processedPayload)); err != nil {
 		return err
 	}
 	changedPayload, err := json.Marshal(walletBalanceChangedData{
-		WalletID: opening.WalletID, TransactionID: opening.ID, Direction: string(ledger.Direction),
-		Money:         eventMoneyFrom(ledger.Amount),
-		BalanceBefore: eventMoneyFrom(ledger.BalanceBefore), BalanceAfter: eventMoneyFrom(ledger.BalanceAfter), WalletVersion: 1,
+		WalletID: opening.WalletID(), TransactionID: opening.ID(), Direction: string(ledger.Direction()),
+		Money:         eventMoneyFrom(ledger.Amount()),
+		BalanceBefore: eventMoneyFrom(ledger.BalanceBefore()), BalanceAfter: eventMoneyFrom(ledger.BalanceAfter()), WalletVersion: 1,
 	})
 	if err != nil {
 		return err
 	}
-	return s.appendEvent(ctx, repositories, "WalletBalanceChanged", opening.WalletID, opening.ID, correlationID, json.RawMessage(changedPayload))
+	return s.appendEvent(ctx, repositories, "WalletBalanceChanged", opening.WalletID(), opening.ID(), correlationID, json.RawMessage(changedPayload))
 }
 
 func (s *OpenWalletService) appendEvent(ctx context.Context, repositories Repositories, eventType, aggregateID, causationID, correlationID string, payload json.RawMessage) error {

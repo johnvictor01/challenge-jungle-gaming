@@ -34,7 +34,7 @@ Na entrada SQS, `(consumer_name, message_id)` e o hash do envelope ficam na inbo
 
 `REFUND` e `ROLLBACK` exigem referência externa resolvida pelo provedor. Enquanto não existir, a operação fica em `PENDING_REFERENCE`; o worker persiste tentativas e o próximo instante de retry. O limite é dez tentativas, após as quais a operação vira `REJECTED` com `REFERENCE_NOT_FOUND`. Referência rejeitada ou falha também não pode ser revertida. A implementação permite no máximo uma reversão bem-sucedida por referência, considerando conjuntamente `REFUND` e `ROLLBACK`; uma reversão que exceda o saldo é rejeitada com `REVERSAL_INSUFFICIENT_FUNDS`. Essas decisões evitam devolver duas vezes o mesmo valor.
 
-Erros de negócio produzem `REJECTED`; erros transitórios de infraestrutura fazem rollback para que a entrega possa ser repetida. O estado `FAILED` e sua transição de domínio existem, mas o worker ainda não classifica falhas permanentes de infraestrutura: falhas de publicação da outbox seguem em retry com backoff persistente. A política definitiva de falha permanente é uma limitação conhecida.
+Erros de negócio produzem `REJECTED`; erros transitórios de infraestrutura são repetidos com backoff. Ao resolver referência pendente, uma falha técnica não causada por cancelamento conta como tentativa persistida; ao atingir o limite, a transação passa para `FAILED` com `REFERENCE_RESOLUTION_FAILED` e evento outbox. Na publicação da outbox, após dez tentativas o evento recebe estado terminal de falha. Eventos terminais deixam de bloquear eventos posteriores do mesmo agregado.
 
 ## Inbox, outbox e SQS
 
@@ -58,8 +58,6 @@ O processo configura `slog` com JSON. Os caminhos HTTP e SQS registram conclusã
 
 ## Limitações atuais
 
-- Os structs de domínio ainda expõem campos públicos. Métodos de transição preservam as invariantes quando usados, mas o compilador não impede escrita direta em `Money`, `Wallet`, `WagerTransaction` ou `WalletLedgerEntry`; portanto, o encapsulamento e a imutabilidade pedidos na seção 6 do README não estão completos.
-- Falhas permanentes de infraestrutura ainda não são classificadas para gravar `FAILED`; o caminho automático atual retenta e usa DLQ para mensagens de entrada.
-- O repositório entrega código, migrations, Compose por dependência, testes e documentação. A gravação e entrega do vídeo de demonstração é uma etapa manual do autor, descrita em [docs/demo.md](docs/demo.md).
+- Credenciais de produção do broker são fornecidas pelo ambiente de deploy; o ambiente local usa LocalStack e credenciais de teste.
 
 O mapeamento requisito por requisito, incluindo evidências e trabalho restante, está em [docs/AUDITORIA_README.md](docs/AUDITORIA_README.md). O progresso de testes está em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).

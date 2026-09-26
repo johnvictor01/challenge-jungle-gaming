@@ -14,9 +14,23 @@ var (
 // Money guarda um valor inteiro em unidades mínimas e a moeda desse valor.
 // Por exemplo, 25,00 BRL é guardado como Units: 2500 e Currency: "BRL".
 type Money struct {
-	Units    int64
-	Currency string
+	units    int64
+	currency string
 }
+
+// NewMoney cria um valor interno em unidades mínimas e exige uma moeda ISO válida.
+func NewMoney(units int64, currency string) (Money, error) {
+	if !validCurrency(currency) {
+		return Money{}, ErrInvalidCurrency
+	}
+	return Money{units: units, currency: currency}, nil
+}
+
+// Units devolve uma cópia do valor em unidades mínimas.
+func (m Money) Units() int64 { return m.units }
+
+// Currency devolve o código ISO associado ao valor.
+func (m Money) Currency() string { return m.currency }
 
 // ParseMoney lê um valor externo com exatamente duas casas decimais.
 // Entradas negativas são rejeitadas; valores negativos internos podem surgir
@@ -53,54 +67,54 @@ func ParseMoney(amount string, currency string) (Money, error) {
 	if err != nil {
 		return Money{}, ErrOverflow
 	}
-	return Money{Units: units, Currency: currency}, nil
+	return Money{units: units, currency: currency}, nil
 }
 
 // Add soma dois valores da mesma moeda e retorna erro se houver overflow.
 func (m Money) Add(other Money) (Money, error) {
-	if m.Currency != other.Currency {
+	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
 	const maxInt64 = int64(1<<63 - 1)
 	const minInt64 = -1 << 63
-	if (other.Units > 0 && m.Units > maxInt64-other.Units) ||
-		(other.Units < 0 && m.Units < minInt64-other.Units) {
+	if (other.units > 0 && m.units > maxInt64-other.units) ||
+		(other.units < 0 && m.units < minInt64-other.units) {
 		return Money{}, ErrOverflow
 	}
-	return Money{Units: m.Units + other.Units, Currency: m.Currency}, nil
+	return Money{units: m.units + other.units, currency: m.currency}, nil
 }
 
 // Subtract subtrai valores da mesma moeda; o resultado interno pode ser negativo.
 func (m Money) Subtract(other Money) (Money, error) {
-	if m.Currency != other.Currency {
+	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
 	const maxInt64 = int64(1<<63 - 1)
 	const minInt64 = -1 << 63
-	if (other.Units > 0 && m.Units < minInt64+other.Units) ||
-		(other.Units < 0 && m.Units > maxInt64+other.Units) {
+	if (other.units > 0 && m.units < minInt64+other.units) ||
+		(other.units < 0 && m.units > maxInt64+other.units) {
 		return Money{}, ErrOverflow
 	}
-	return Money{Units: m.Units - other.Units, Currency: m.Currency}, nil
+	return Money{units: m.units - other.units, currency: m.currency}, nil
 }
 
 // Negate troca o sinal e rejeita o único valor que não cabe após a troca.
 func (m Money) Negate() (Money, error) {
-	if m.Units == -1<<63 {
+	if m.units == -1<<63 {
 		return Money{}, ErrOverflow
 	}
-	return Money{Units: -m.Units, Currency: m.Currency}, nil
+	return Money{units: -m.units, currency: m.currency}, nil
 }
 
 // Compare compara valores da mesma moeda: -1 menor, 0 igual, 1 maior.
 func (m Money) Compare(other Money) (int, error) {
-	if m.Currency != other.Currency {
+	if m.currency != other.currency {
 		return 0, ErrCurrencyMismatch
 	}
-	if m.Units < other.Units {
+	if m.units < other.units {
 		return -1, nil
 	}
-	if m.Units > other.Units {
+	if m.units > other.units {
 		return 1, nil
 	}
 	return 0, nil
@@ -108,13 +122,13 @@ func (m Money) Compare(other Money) (int, error) {
 
 // String mostra o valor com duas casas decimais e o código da moeda.
 func (m Money) String() string {
-	negative := m.Units < 0
+	negative := m.units < 0
 	var magnitude uint64
 	if negative {
 		// Esta forma também funciona para o menor int64, cujo positivo não cabe.
-		magnitude = uint64(-(m.Units + 1)) + 1
+		magnitude = uint64(-(m.units + 1)) + 1
 	} else {
-		magnitude = uint64(m.Units)
+		magnitude = uint64(m.units)
 	}
 	amount := strconv.FormatUint(magnitude/100, 10) + "."
 	cents := magnitude % 100
@@ -125,5 +139,5 @@ func (m Money) String() string {
 	if negative {
 		amount = "-" + amount
 	}
-	return amount + " " + m.Currency
+	return amount + " " + m.currency
 }

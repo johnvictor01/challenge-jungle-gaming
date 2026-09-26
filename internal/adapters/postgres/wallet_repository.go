@@ -28,7 +28,7 @@ func (r walletRepository) Create(ctx context.Context, wallet *domain.Wallet) err
 	_, err := r.tx.Exec(ctx, `INSERT INTO wallets
         (id, player_id, currency, balance_minor, version, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		wallet.ID, wallet.PlayerID, wallet.Currency, wallet.Balance.Units, wallet.Version, wallet.CreatedAt, wallet.UpdatedAt)
+		wallet.ID(), wallet.PlayerID(), wallet.Currency(), wallet.Balance().Units(), wallet.Version(), wallet.CreatedAt(), wallet.UpdatedAt())
 	return mapError(err)
 }
 
@@ -36,7 +36,7 @@ func (r walletRepository) Update(ctx context.Context, wallet *domain.Wallet, exp
 	command, err := r.tx.Exec(ctx, `UPDATE wallets
         SET balance_minor = $1, version = $2, updated_at = $3
         WHERE id = $4 AND version = $5`,
-		wallet.Balance.Units, wallet.Version, wallet.UpdatedAt, wallet.ID, expectedVersion)
+		wallet.Balance().Units(), wallet.Version(), wallet.UpdatedAt(), wallet.ID(), expectedVersion)
 	if err != nil {
 		return mapError(err)
 	}
@@ -55,7 +55,11 @@ func scanWallet(row rowScanner) (*domain.Wallet, error) {
 	if err := row.Scan(&id, &playerID, &currency, &balance, &version, &created, &updated); err != nil {
 		return nil, mapError(err)
 	}
-	wallet, err := domain.RehydrateWallet(id, playerID, domain.Money{Units: balance, Currency: currency}, version, created, updated)
+	money, err := domain.NewMoney(balance, currency)
+	if err != nil {
+		return nil, err
+	}
+	wallet, err := domain.RehydrateWallet(id, playerID, money, version, created, updated)
 	if err != nil {
 		return nil, fmt.Errorf("rehydrate wallet: %w", err)
 	}

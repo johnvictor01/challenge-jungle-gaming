@@ -7,7 +7,7 @@ import (
 )
 
 func ledgerMoney(units int64) Money {
-	return Money{Units: units, Currency: "BRL"}
+	return Money{units: units, currency: "BRL"}
 }
 
 // TestWalletLedgerEntryCredit verifica que saldo posterior = saldo anterior + valor.
@@ -24,11 +24,11 @@ func TestWalletLedgerEntryCredit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewWalletLedgerEntry retornou erro: %v", err)
 		}
-		if entry.Direction != DirectionCredit || entry.Amount.Units != tc.amount || entry.BalanceAfter.Units != tc.after {
+		if entry.direction != DirectionCredit || entry.amount.Units() != tc.amount || entry.balanceAfter.Units() != tc.after {
 			t.Errorf("lançamento de crédito incorreto: %+v", entry)
 		}
-		if entry.CreatedAt.IsZero() || entry.CreatedAt.Location() != time.UTC {
-			t.Errorf("data de criação deveria existir em UTC: %v", entry.CreatedAt)
+		if entry.createdAt.IsZero() || entry.createdAt.Location() != time.UTC {
+			t.Errorf("data de criação deveria existir em UTC: %v", entry.createdAt)
 		}
 	}
 }
@@ -48,7 +48,7 @@ func TestWalletLedgerEntryDebit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewWalletLedgerEntry retornou erro: %v", err)
 		}
-		if entry.Direction != DirectionDebit || entry.BalanceAfter.Units != tc.after {
+		if entry.direction != DirectionDebit || entry.balanceAfter.Units() != tc.after {
 			t.Errorf("lançamento de débito incorreto: %+v", entry)
 		}
 	}
@@ -82,10 +82,10 @@ func TestWalletLedgerEntryRejectsDifferentCurrencies(t *testing.T) {
 		amount        Money
 		before, after Money
 	}{
-		{"valor", Money{Units: 100, Currency: "USD"}, ledgerMoney(0), ledgerMoney(100)},
-		{"saldo anterior", valid, Money{Units: 0, Currency: "USD"}, ledgerMoney(200)},
-		{"saldo posterior", valid, ledgerMoney(0), Money{Units: 200, Currency: "USD"}},
-		{"código inválido", Money{Units: 100, Currency: "brl"}, Money{Units: 0, Currency: "brl"}, Money{Units: 200, Currency: "brl"}},
+		{"valor", Money{units: 100, currency: "USD"}, ledgerMoney(0), ledgerMoney(100)},
+		{"saldo anterior", valid, Money{units: 0, currency: "USD"}, ledgerMoney(200)},
+		{"saldo posterior", valid, ledgerMoney(0), Money{units: 200, currency: "USD"}},
+		{"código inválido", Money{units: 100, currency: "brl"}, Money{units: 0, currency: "brl"}, Money{units: 200, currency: "brl"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,8 +181,8 @@ func TestRehydrateWalletLedgerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RehydrateWalletLedgerEntry retornou erro: %v", err)
 	}
-	if entry.CreatedAt.Location() != time.UTC || !entry.CreatedAt.Equal(createdAt) {
-		t.Errorf("data recuperada incorretamente: %v", entry.CreatedAt)
+	if entry.createdAt.Location() != time.UTC || !entry.createdAt.Equal(createdAt) {
+		t.Errorf("data recuperada incorretamente: %v", entry.createdAt)
 	}
 	if _, err := RehydrateWalletLedgerEntry("entry-1", "wallet-1", "transaction-1", DirectionCredit, ledgerMoney(100), ledgerMoney(0), ledgerMoney(100), time.Time{}); !errors.Is(err, ErrInvalidLedgerTimestamp) {
 		t.Errorf("esperava ErrInvalidLedgerTimestamp, recebeu %v", err)

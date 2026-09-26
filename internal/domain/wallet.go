@@ -24,14 +24,22 @@ var (
 
 // Wallet guarda identidade, jogador, moeda, saldo, versão e datas da carteira.
 type Wallet struct {
-	ID        string
-	PlayerID  string
-	Currency  string
-	Balance   Money
-	Version   int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	id        string
+	playerID  string
+	currency  string
+	balance   Money
+	version   int64
+	createdAt time.Time
+	updatedAt time.Time
 }
+
+func (w *Wallet) ID() string               { return w.id }
+func (w *Wallet) PlayerID() string         { return w.playerID }
+func (w *Wallet) Currency() string         { return w.currency }
+func (w *Wallet) Balance() Money           { return w.balance }
+func (w *Wallet) Version() int64           { return w.version }
+func (w *Wallet) CreatedAt() time.Time     { return w.createdAt }
+func (w *Wallet) UpdatedAt() time.Time     { return w.updatedAt }
 
 // NewWallet cria uma carteira com ID novo, saldo inicial e versão 1.
 func NewWallet(playerID string, currency string, initialBalance int64) (*Wallet, error) {
@@ -51,13 +59,13 @@ func NewWallet(playerID string, currency string, initialBalance int64) (*Wallet,
 	}
 	now := time.Now().UTC()
 	return &Wallet{
-		ID:        id,
-		PlayerID:  playerID,
-		Currency:  currency,
-		Balance:   Money{Units: initialBalance, Currency: currency},
-		Version:   1,
-		CreatedAt: now,
-		UpdatedAt: now,
+		id:        id,
+		playerID:  playerID,
+		currency:  currency,
+		balance:   Money{units: initialBalance, currency: currency},
+		version:   1,
+		createdAt: now,
+		updatedAt: now,
 	}, nil
 }
 
@@ -69,10 +77,10 @@ func RehydrateWallet(id string, playerID string, balance Money, version int64, c
 	if strings.TrimSpace(playerID) == "" {
 		return nil, ErrInvalidPlayerID
 	}
-	if !validCurrency(balance.Currency) {
+	if !validCurrency(balance.Currency()) {
 		return nil, ErrInvalidCurrency
 	}
-	if balance.Units < 0 {
+	if balance.Units() < 0 {
 		return nil, ErrNegativeBalance
 	}
 	if version < 1 {
@@ -83,13 +91,13 @@ func RehydrateWallet(id string, playerID string, balance Money, version int64, c
 	}
 
 	return &Wallet{
-		ID:        id,
-		PlayerID:  playerID,
-		Currency:  balance.Currency,
-		Balance:   balance,
-		Version:   version,
-		CreatedAt: createdAt.UTC(),
-		UpdatedAt: updatedAt.UTC(),
+		id:        id,
+		playerID:  playerID,
+		currency:  balance.Currency(),
+		balance:   balance,
+		version:   version,
+		createdAt: createdAt.UTC(),
+		updatedAt: updatedAt.UTC(),
 	}, nil
 }
 
@@ -98,18 +106,18 @@ func (w *Wallet) Credit(amount Money) error {
 	if err := w.validateMovement(amount); err != nil {
 		return err
 	}
-	if amount.Units == 0 {
+	if amount.Units() == 0 {
 		return nil
 	}
-	newBalance, err := w.Balance.Add(amount)
+	newBalance, err := w.balance.Add(amount)
 	if err != nil {
 		return err
 	}
 	if err := w.advanceVersion(); err != nil {
 		return err
 	}
-	w.Balance = newBalance
-	w.UpdatedAt = time.Now().UTC()
+	w.balance = newBalance
+	w.updatedAt = time.Now().UTC()
 	return nil
 }
 
@@ -118,24 +126,24 @@ func (w *Wallet) Debit(amount Money) error {
 	if err := w.validateMovement(amount); err != nil {
 		return err
 	}
-	if amount.Units == 0 {
+	if amount.Units() == 0 {
 		return nil
 	}
-	if amount.Units > w.Balance.Units {
+	if amount.Units() > w.balance.Units() {
 		return ErrInsufficientFunds
 	}
-	newBalance, err := w.Balance.Subtract(amount)
+	newBalance, err := w.balance.Subtract(amount)
 	if err != nil {
 		return err
 	}
-	if newBalance.Units < 0 {
+	if newBalance.Units() < 0 {
 		return ErrInsufficientFunds
 	}
 	if err := w.advanceVersion(); err != nil {
 		return err
 	}
-	w.Balance = newBalance
-	w.UpdatedAt = time.Now().UTC()
+	w.balance = newBalance
+	w.updatedAt = time.Now().UTC()
 	return nil
 }
 
@@ -143,20 +151,20 @@ func (w *Wallet) validateMovement(amount Money) error {
 	if w == nil {
 		return errors.New("wallet cannot be nil")
 	}
-	if amount.Currency != w.Currency {
+	if amount.Currency() != w.currency {
 		return ErrCurrencyMismatch
 	}
-	if amount.Units < 0 {
+	if amount.Units() < 0 {
 		return ErrInvalidAmount
 	}
 	return nil
 }
 
 func (w *Wallet) advanceVersion() error {
-	if w.Version == int64(^uint64(0)>>1) {
+	if w.version == int64(^uint64(0)>>1) {
 		return ErrVersionOverflow
 	}
-	w.Version++
+	w.version++
 	return nil
 }
 

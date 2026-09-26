@@ -108,7 +108,7 @@ func (s *QueryService) Ledger(ctx context.Context, walletID, cursor string, limi
 	if len(entries) > limit {
 		entries = entries[:limit]
 		last := entries[len(entries)-1]
-		cursorValue := last.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID
+		cursorValue := last.CreatedAt().UTC().Format(time.RFC3339Nano) + "|" + last.ID()
 		page.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(cursorValue))
 	}
 	page.Entries = entries
@@ -131,12 +131,15 @@ func (s *QueryService) Reconcile(ctx context.Context, walletID string) (Reconcil
 		if summary.Debits > summary.Credits {
 			return domain.ErrNegativeBalance
 		}
-		calculated := domain.Money{Units: summary.Credits - summary.Debits, Currency: wallet.Currency}
-		difference, err := wallet.Balance.Subtract(calculated)
+		calculated, err := domain.NewMoney(summary.Credits-summary.Debits, wallet.Currency())
 		if err != nil {
 			return err
 		}
-		result = Reconciliation{WalletID: wallet.ID, StoredBalance: wallet.Balance, CalculatedBalance: calculated, Difference: difference, Consistent: difference.Units == 0, CheckedEntries: summary.Count}
+		difference, err := wallet.Balance().Subtract(calculated)
+		if err != nil {
+			return err
+		}
+		result = Reconciliation{WalletID: wallet.ID(), StoredBalance: wallet.Balance(), CalculatedBalance: calculated, Difference: difference, Consistent: difference.Units() == 0, CheckedEntries: summary.Count}
 		return nil
 	})
 	if err == nil && !result.Consistent {

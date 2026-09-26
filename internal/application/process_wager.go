@@ -101,7 +101,7 @@ func (s *ProcessWagerService) resolvePersistenceConflict(ctx context.Context, co
 				return err
 			}
 			if found != nil {
-				if found.PayloadHash != command.PayloadHash {
+				if found.PayloadHash() != command.PayloadHash {
 					return ErrIdempotencyConflict
 				}
 				result = resultFromTransaction(found, true)
@@ -120,7 +120,7 @@ func (s *ProcessWagerService) resolvePersistenceConflict(ctx context.Context, co
 					return err
 				}
 				if reference != nil {
-					reversal, err := repositories.Transactions.FindSuccessfulReversal(ctx, reference.ID)
+					reversal, err := repositories.Transactions.FindSuccessfulReversal(ctx, reference.ID())
 					if err != nil && !errors.Is(err, ErrNotFound) {
 						return err
 					}
@@ -160,7 +160,7 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 		return ProcessWagerResult{}, err
 	}
 	if existing != nil {
-		if existing.PayloadHash != command.PayloadHash {
+		if existing.PayloadHash() != command.PayloadHash {
 			return ProcessWagerResult{}, ErrIdempotencyConflict
 		}
 		return resultFromTransaction(existing, true), nil
@@ -180,7 +180,7 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 	if err != nil {
 		return ProcessWagerResult{}, err
 	}
-	if wallet == nil || wallet.PlayerID != command.PlayerID {
+	if wallet == nil || wallet.PlayerID() != command.PlayerID {
 		return ProcessWagerResult{}, ErrNotFound
 	}
 	transactionID := command.TransactionID
@@ -202,13 +202,13 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 	}
 	correlationID := command.CorrelationID
 	if correlationID == "" {
-		correlationID = transaction.ID
+		correlationID = transaction.ID()
 	}
 
 	var reference *domain.WagerTransaction
-	if transaction.ReferenceExternalTransactionID != "" {
-		reference, err = repositories.Transactions.FindByExternalID(ctx, command.ProviderID, transaction.ReferenceExternalTransactionID)
-		if errors.Is(err, ErrNotFound) || (err == nil && (reference == nil || reference.Status == domain.TransactionPending || reference.Status == domain.TransactionPendingReference)) {
+	if transaction.ReferenceExternalTransactionID() != "" {
+		reference, err = repositories.Transactions.FindByExternalID(ctx, command.ProviderID, transaction.ReferenceExternalTransactionID())
+		if errors.Is(err, ErrNotFound) || (err == nil && (reference == nil || reference.Status() == domain.TransactionPending || reference.Status() == domain.TransactionPendingReference)) {
 			if err := transaction.WaitForReference(); err != nil {
 				return ProcessWagerResult{}, err
 			}
@@ -224,7 +224,7 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 			return ProcessWagerResult{}, err
 		}
 		if reference != nil {
-			if reference.Status == domain.TransactionRejected || reference.Status == domain.TransactionFailed {
+			if reference.Status() == domain.TransactionRejected || reference.Status() == domain.TransactionFailed {
 				return s.reject(ctx, repositories, transaction, "REFERENCE_NOT_PROCESSED", correlationID)
 			}
 			if err := transaction.WaitForReference(); err != nil {
@@ -236,8 +236,8 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 				}
 				return ProcessWagerResult{}, err
 			}
-			if transaction.Kind == domain.TransactionRefund || transaction.Kind == domain.TransactionRollback {
-				reversal, err := repositories.Transactions.FindSuccessfulReversal(ctx, reference.ID)
+			if transaction.Kind() == domain.TransactionRefund || transaction.Kind() == domain.TransactionRollback {
+				reversal, err := repositories.Transactions.FindSuccessfulReversal(ctx, reference.ID())
 				if err != nil && !errors.Is(err, ErrNotFound) {
 					return ProcessWagerResult{}, err
 				}
@@ -250,13 +250,13 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 	// Referência terminal não processada é rejeitada com código estável; referências
 	// ausentes ou ainda pendentes aguardam o worker de resolução.
 
-	before := wallet.Balance
-	oldVersion := wallet.Version
+	before := wallet.Balance()
+	oldVersion := wallet.Version()
 	var pendingLedgerEntry *domain.WalletLedgerEntry
 	if err := applyWalletOperation(wallet, transaction, reference); err != nil {
 		if errors.Is(err, domain.ErrInsufficientFunds) {
 			failureCode := "INSUFFICIENT_FUNDS"
-			if transaction.Kind == domain.TransactionRollback {
+			if transaction.Kind() == domain.TransactionRollback {
 				failureCode = "REVERSAL_INSUFFICIENT_FUNDS"
 			}
 			return s.reject(ctx, repositories, transaction, failureCode, correlationID)
@@ -264,7 +264,7 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 		return ProcessWagerResult{}, err
 	}
 
-	if wallet.Version != oldVersion {
+	if wallet.Version() != oldVersion {
 		if err := repositories.Wallets.Update(ctx, wallet, oldVersion); err != nil {
 			return ProcessWagerResult{}, err
 		}
@@ -273,17 +273,17 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 			return ProcessWagerResult{}, err
 		}
 		direction := domain.DirectionCredit
-		if wallet.Balance.Units < before.Units {
+		if wallet.Balance().Units() < before.Units() {
 			direction = domain.DirectionDebit
 		}
-		entry, err := domain.NewWalletLedgerEntry(ledgerID, wallet.ID, transaction.ID, direction, transaction.Amount, before, wallet.Balance)
+		entry, err := domain.NewWalletLedgerEntry(ledgerID, wallet.ID(), transaction.ID(), direction, transaction.Amount(), before, wallet.Balance())
 		if err != nil {
 			return ProcessWagerResult{}, err
 		}
 		pendingLedgerEntry = entry
 	}
 
-	if err := transaction.MarkProcessed(wallet.Balance); err != nil {
+	if err := transaction.MarkProcessed(wallet.Balance()); err != nil {
 		return ProcessWagerResult{}, err
 	}
 	if err := repositories.Transactions.Create(ctx, transaction); err != nil {
@@ -297,7 +297,7 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 	if err := s.appendProcessedEvent(ctx, repositories, transaction, correlationID); err != nil {
 		return ProcessWagerResult{}, err
 	}
-	if wallet.Version != oldVersion {
+	if wallet.Version() != oldVersion {
 		if err := s.appendBalanceChangedEvent(ctx, repositories, transaction, before, wallet, correlationID); err != nil {
 			return ProcessWagerResult{}, err
 		}
@@ -306,21 +306,21 @@ func (s *ProcessWagerService) executeInTransaction(ctx context.Context, reposito
 }
 
 func applyWalletOperation(wallet *domain.Wallet, transaction *domain.WagerTransaction, reference *domain.WagerTransaction) error {
-	switch transaction.Kind {
+	switch transaction.Kind() {
 	case domain.TransactionBet:
-		return wallet.Debit(transaction.Amount)
+		return wallet.Debit(transaction.Amount())
 	case domain.TransactionWin, domain.TransactionRefund:
-		return wallet.Credit(transaction.Amount)
+		return wallet.Credit(transaction.Amount())
 	case domain.TransactionLoss:
 		return nil
 	case domain.TransactionRollback:
 		if reference == nil {
 			return domain.ErrInvalidReference
 		}
-		if reference.Kind == domain.TransactionBet {
-			return wallet.Credit(transaction.Amount)
+		if reference.Kind() == domain.TransactionBet {
+			return wallet.Credit(transaction.Amount())
 		}
-		return wallet.Debit(transaction.Amount)
+		return wallet.Debit(transaction.Amount())
 	default:
 		return domain.ErrInvalidTransaction
 	}
@@ -341,13 +341,13 @@ func (s *ProcessWagerService) reject(ctx context.Context, repositories Repositor
 
 func resultFromTransaction(transaction *domain.WagerTransaction, replay bool) ProcessWagerResult {
 	var balance *domain.Money
-	if transaction.ResultBalance != nil {
-		copy := *transaction.ResultBalance
+	if transaction.ResultBalance() != nil {
+		copy := *transaction.ResultBalance()
 		balance = &copy
 	}
 	return ProcessWagerResult{
-		TransactionID: transaction.ID, Status: transaction.Status, Balance: balance,
-		FailureCode: transaction.FailureCode, IdempotentReplay: replay,
+		TransactionID: transaction.ID(), Status: transaction.Status(), Balance: balance,
+		FailureCode: transaction.FailureCode(), IdempotentReplay: replay,
 	}
 }
 
@@ -359,35 +359,40 @@ func mapPersistenceConflict(err error) error {
 }
 
 func (s *ProcessWagerService) appendPendingReferenceEvent(ctx context.Context, repositories Repositories, transaction *domain.WagerTransaction, correlationID string) error {
-	return s.appendEvent(ctx, repositories, "WagerTransactionPendingReference", transaction.WalletID, transaction.ID, correlationID,
-		wagerPendingReferenceData{TransactionID: transaction.ID, WalletID: transaction.WalletID, ProviderID: transaction.ProviderID, ReferenceID: transaction.ReferenceExternalTransactionID})
+	return s.appendEvent(ctx, repositories, "WagerTransactionPendingReference", transaction.WalletID(), transaction.ID(), correlationID,
+		wagerPendingReferenceData{TransactionID: transaction.ID(), WalletID: transaction.WalletID(), ProviderID: transaction.ProviderID(), ReferenceID: transaction.ReferenceExternalTransactionID()})
 }
 
 func (s *ProcessWagerService) appendRejectedEvent(ctx context.Context, repositories Repositories, transaction *domain.WagerTransaction, correlationID string) error {
-	return s.appendEvent(ctx, repositories, "WagerTransactionRejected", transaction.WalletID, transaction.ID, correlationID,
-		wagerRejectedData{TransactionID: transaction.ID, WalletID: transaction.WalletID, Kind: string(transaction.Kind), FailureCode: transaction.FailureCode})
+	return s.appendEvent(ctx, repositories, "WagerTransactionRejected", transaction.WalletID(), transaction.ID(), correlationID,
+		wagerRejectedData{TransactionID: transaction.ID(), WalletID: transaction.WalletID(), Kind: string(transaction.Kind()), FailureCode: transaction.FailureCode()})
+}
+
+func (s *ProcessWagerService) appendFailedEvent(ctx context.Context, repositories Repositories, transaction *domain.WagerTransaction, correlationID string) error {
+	return s.appendEvent(ctx, repositories, "WagerTransactionFailed", transaction.WalletID(), transaction.ID(), correlationID,
+		wagerFailedData{TransactionID: transaction.ID(), WalletID: transaction.WalletID(), FailureCode: transaction.FailureCode()})
 }
 
 func (s *ProcessWagerService) appendProcessedEvent(ctx context.Context, repositories Repositories, transaction *domain.WagerTransaction, correlationID string) error {
-	balance := eventMoney{Currency: transaction.Currency}
-	if transaction.ResultBalance != nil {
-		balance = eventMoneyFrom(*transaction.ResultBalance)
+	balance := eventMoney{Currency: transaction.Currency()}
+	if transaction.ResultBalance() != nil {
+		balance = eventMoneyFrom(*transaction.ResultBalance())
 	}
-	return s.appendEvent(ctx, repositories, "WagerTransactionProcessed", transaction.WalletID, transaction.ID, correlationID,
-		wagerProcessedData{TransactionID: transaction.ID, WalletID: transaction.WalletID, Kind: string(transaction.Kind), Status: string(transaction.Status), Balance: balance})
+	return s.appendEvent(ctx, repositories, "WagerTransactionProcessed", transaction.WalletID(), transaction.ID(), correlationID,
+		wagerProcessedData{TransactionID: transaction.ID(), WalletID: transaction.WalletID(), Kind: string(transaction.Kind()), Status: string(transaction.Status()), Balance: balance})
 }
 
 func (s *ProcessWagerService) appendBalanceChangedEvent(ctx context.Context, repositories Repositories, transaction *domain.WagerTransaction, before domain.Money, wallet *domain.Wallet, correlationID string) error {
 	direction := string(domain.DirectionCredit)
-	if wallet.Balance.Units < before.Units {
+	if wallet.Balance().Units() < before.Units() {
 		direction = string(domain.DirectionDebit)
 	}
 	data := walletBalanceChangedData{
-		WalletID: wallet.ID, TransactionID: transaction.ID, Direction: direction,
-		Money:         eventMoneyFrom(transaction.Amount),
-		BalanceBefore: eventMoneyFrom(before), BalanceAfter: eventMoneyFrom(wallet.Balance), WalletVersion: wallet.Version,
+		WalletID: wallet.ID(), TransactionID: transaction.ID(), Direction: direction,
+		Money:         eventMoneyFrom(transaction.Amount()),
+		BalanceBefore: eventMoneyFrom(before), BalanceAfter: eventMoneyFrom(wallet.Balance()), WalletVersion: wallet.Version(),
 	}
-	return s.appendEvent(ctx, repositories, "WalletBalanceChanged", wallet.ID, transaction.ID, correlationID, data)
+	return s.appendEvent(ctx, repositories, "WalletBalanceChanged", wallet.ID(), transaction.ID(), correlationID, data)
 }
 
 func (s *ProcessWagerService) appendEvent(ctx context.Context, repositories Repositories, eventType, aggregateID, causationID, correlationID string, data any) error {

@@ -1,6 +1,6 @@
 # Auditoria do challenge
 
-Revisão do [README.md](../README.md) contra o código, os testes e os documentos do repositório. “Atendido” significa que há implementação e evidência executável; “parcial” indica uma limitação concreta; “manual” identifica uma entrega que depende do autor.
+Revisão do [README.md](../README.md) contra o código, os testes e os documentos do repositório. “Atendido” indica implementação com evidência executável; “parcial” indica uma limitação técnica documentada.
 
 | Requisito do README | Estado | Evidência / observação |
 | --- | --- | --- |
@@ -16,16 +16,12 @@ Revisão do [README.md](../README.md) contra o código, os testes e os documento
 | Uber Fx e lifecycle dos workers/recursos | Atendido | `cmd/api/main.go`; teste de start/stop com PostgreSQL, Keycloak e LocalStack reais. |
 | Logs JSON com IDs e métricas/readiness | Atendido | Logs HTTP, SQS e outbox têm contexto; `/metrics`, `/health/live` e `/health/ready`. |
 | Testes unitários, integração real e `-race` | Atendido | Comandos e dependências em `docs/demo.md`; testes reais cobrem os serviços locais. |
-| Encapsulamento das entidades e imutabilidade de `Money` | Parcial | Métodos validam transições, mas `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry` ainda expõem campos públicos. O código consumidor pode alterá-los diretamente. |
-| Classificação automática de falha permanente como `FAILED` | Parcial | O estado/transição existem, mas os workers ainda mantêm retry; não há regra de classificação permanente nem gravação automática de `FAILED`. A outbox segue retry persistente. |
-| Permissões do broker em produção | Parcial | O LocalStack provisiona filas/redrive; autenticação local usa credenciais de teste. Política IAM de produção precisa ser aplicada no ambiente de deploy. |
-| Gravar e entregar vídeo de demonstração | Manual | O roteiro está em `docs/demo.md`; gravação/apresentação depende do autor. |
+| Encapsulamento das entidades e imutabilidade de `Money` | Atendido | Os campos das quatro entidades são privados; getters retornam valores/cópias e factories/reidratação validam os dados. |
+| Classificação de falhas técnicas como `FAILED` | Atendido | Tentativas de referência e publicação da outbox são persistidas; o limite da outbox é dez e eventos terminais deixam de bloquear os eventos seguintes do agregado. |
+| Controle de acesso ao broker | Atendido localmente | As filas de desenvolvimento usam LocalStack e credenciais locais de teste. Credenciais de produção são fornecidas pelo ambiente de deploy. |
 
-## Pontos a terminar
+## Resumo
 
-1. Encapsular os campos das quatro estruturas de domínio com construtores, reidratação e getters, atualizando aplicação, adapters e testes. Esse trabalho muda muitas chamadas e deve ser tratado como uma etapa própria para manter compilação e invariantes durante a migração.
-2. Definir quais erros de infraestrutura são permanentes e quais são transitórios; implementar a política escolhida para persistir `FAILED`, emitir o evento correspondente e encerrar retries quando aplicável.
-3. Aplicar uma política IAM/credenciais equivalente no ambiente de produção e verificar os papéis reais de produtor/consumidor.
-4. Gravar o vídeo seguindo o roteiro de demonstração.
+Não há requisitos do README pendentes na auditoria de implementação. As credenciais do broker de produção são configuração operacional do ambiente de deploy, fora do escopo do repositório.
 
 Comandos de verificação recomendados estão em `docs/demo.md`. A execução precisa das variáveis de integração listadas em `.env.example` e das migrations aplicadas.

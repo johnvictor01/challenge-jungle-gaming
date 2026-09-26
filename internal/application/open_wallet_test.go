@@ -15,31 +15,31 @@ func openWalletService(state *memoryState) (*OpenWalletService, *memoryUnitOfWor
 
 func TestOpenWalletWithInitialBalance(t *testing.T) {
 	service, uow := openWalletService(newMemoryState())
-	result, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: domain.Money{Units: 2_500, Currency: "BRL"}})
+	result, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: testMoney(2_500, "BRL")})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Wallet == nil || result.Wallet.Balance.Units != 2_500 {
+	if result.Wallet == nil || result.Wallet.Balance().Units() != 2_500 {
 		t.Fatalf("wallet = %+v", result.Wallet)
 	}
-	if result.Opening == nil || result.Opening.Status != domain.TransactionProcessed {
+	if result.Opening == nil || result.Opening.Status() != domain.TransactionProcessed {
 		t.Fatalf("opening = %+v", result.Opening)
 	}
 	if len(uow.state.wallets) != 1 || len(uow.state.transactions) != 1 || len(uow.state.ledger) != 1 || len(uow.state.events) != 2 {
 		t.Errorf("records = wallets:%d transactions:%d ledger:%d events:%d, want 1/1/1/2", len(uow.state.wallets), len(uow.state.transactions), len(uow.state.ledger), len(uow.state.events))
 	}
-	if got := uow.state.ledger[0]; got.Direction != domain.DirectionCredit || got.BalanceBefore.Units != 0 || got.BalanceAfter.Units != 2_500 {
+	if got := uow.state.ledger[0]; got.Direction() != domain.DirectionCredit || got.BalanceBefore().Units() != 0 || got.BalanceAfter().Units() != 2_500 {
 		t.Errorf("opening ledger entry = %+v", got)
 	}
 }
 
 func TestOpenWalletWithZeroBalance(t *testing.T) {
 	service, uow := openWalletService(newMemoryState())
-	result, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: domain.Money{Currency: "BRL"}})
+	result, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: testMoney(0, "BRL")})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Wallet == nil || result.Wallet.Balance.Units != 0 || result.Opening != nil {
+	if result.Wallet == nil || result.Wallet.Balance().Units() != 0 || result.Opening != nil {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if len(uow.state.wallets) != 1 || len(uow.state.transactions) != 0 || len(uow.state.ledger) != 0 || len(uow.state.events) != 0 {
@@ -51,7 +51,7 @@ func TestOpenWalletRejectsDuplicatePlayerCurrency(t *testing.T) {
 	state := newMemoryState()
 	seedMemoryWallet(t, state, 0)
 	service, _ := openWalletService(state)
-	_, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: domain.Money{Currency: "BRL"}})
+	_, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: testMoney(0, "BRL")})
 	if !errors.Is(err, ErrWalletAlreadyExists) {
 		t.Fatalf("error = %v, want ErrWalletAlreadyExists", err)
 	}
@@ -59,9 +59,9 @@ func TestOpenWalletRejectsDuplicatePlayerCurrency(t *testing.T) {
 
 func TestOpenWalletRejectsInvalidInput(t *testing.T) {
 	for _, command := range []OpenWalletCommand{
-		{InitialBalance: domain.Money{Currency: "BRL"}},
-		{PlayerID: "player-1", InitialBalance: domain.Money{Units: -1, Currency: "BRL"}},
-		{PlayerID: "player-1", InitialBalance: domain.Money{Units: 1, Currency: "brl"}},
+		{InitialBalance: testMoney(0, "BRL")},
+		{PlayerID: "player-1", InitialBalance: testMoney(-1, "BRL")},
+		{PlayerID: "player-1", InitialBalance: domain.Money{}},
 	} {
 		service, _ := openWalletService(newMemoryState())
 		if _, err := service.Execute(context.Background(), command); err == nil {
@@ -74,7 +74,7 @@ func TestOpenWalletPersistenceFailure(t *testing.T) {
 	state := newMemoryState()
 	state.failOn = "outbox_append"
 	service, uow := openWalletService(state)
-	_, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: domain.Money{Units: 2_500, Currency: "BRL"}})
+	_, err := service.Execute(context.Background(), OpenWalletCommand{PlayerID: "player-1", InitialBalance: testMoney(2_500, "BRL")})
 	if err == nil {
 		t.Fatal("Execute() error = nil, want injected failure")
 	}

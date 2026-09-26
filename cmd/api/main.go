@@ -49,7 +49,7 @@ func options(logger *slog.Logger) []fx.Option {
 			return postgres.NewOutboxDispatcherRepository(store)
 		}),
 		fx.Provide(func(repository *postgres.OutboxDispatcherRepository, publisher *sqsadapter.Publisher, config platform.Config, logger *slog.Logger) (*application.OutboxDispatcher, error) {
-			return application.NewOutboxDispatcher(repository, publisher, application.OutboxDispatchConfig{Owner: config.WorkerID, Logger: logger})
+			return application.NewOutboxDispatcher(repository, publisher, application.OutboxDispatchConfig{Owner: config.WorkerID, Logger: logger, MaxAttempts: 10})
 		}),
 		fx.Provide(func(store *postgres.Store, processor *application.ProcessWagerService, client *sqs.Client, config platform.Config) (*sqsadapter.Consumer, error) {
 			if config.SQSInputQueueURL == "" {

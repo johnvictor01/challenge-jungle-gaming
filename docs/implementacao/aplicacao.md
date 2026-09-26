@@ -10,7 +10,7 @@
 
 - `OpenWalletService`: cria uma carteira; com saldo inicial positivo grava `OPENING`, crédito no ledger e dois eventos. Com zero, cria somente a carteira.
 - `ProcessWagerService`: valida idempotência, resolve regras de aposta e movimenta a carteira conforme `BET`, `WIN`, `LOSS`, `REFUND` ou `ROLLBACK`.
-- `ResolvePendingReferenceService`: tenta novamente operações em `PENDING_REFERENCE`, agenda backoff exponencial ou rejeita depois de dez tentativas padrão.
+- `ResolvePendingReferenceService`: tenta novamente operações em `PENDING_REFERENCE`, agenda backoff exponencial quando a referência não chegou; ao limite rejeita com `REFERENCE_NOT_FOUND`. Falhas técnicas também são contadas e, no limite, encerram em `FAILED` com `REFERENCE_RESOLUTION_FAILED`.
 - `PendingReferenceWorker`: busca no PostgreSQL referências pendentes que já podem ser tentadas e chama o serviço de retomada; a busca usa apenas estado persistido, então a retomada funciona depois de reiniciar o processo.
 - `OutboxDispatcher`: reivindica eventos confirmados no banco, publica pelo port SQS e confirma ou agenda nova tentativa com backoff persistido.
 - `ProcessInboxWagerService`: calcula o mesmo hash de negócio usado por HTTP, registra o ID da mensagem e chama o processamento financeiro dentro da mesma transação SQL.

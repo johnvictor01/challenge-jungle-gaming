@@ -51,20 +51,20 @@ func (r transactionRepository) Update(ctx context.Context, transaction *domain.W
         result_balance_minor = $5, result_currency = $6, attempt_count = $7,
         next_attempt_at = $8, updated_at = $9, processed_at = $10
         WHERE id = $1`,
-		transaction.ID, nullableString(transaction.ReferenceTransactionID), string(transaction.Status), nullableString(transaction.FailureCode),
-		resultBalance(transaction), resultCurrency(transaction), transaction.AttemptCount, transaction.NextAttemptAt,
-		transaction.UpdatedAt, transaction.ProcessedAt)
+		transaction.ID(), nullableString(transaction.ReferenceTransactionID()), string(transaction.Status()), nullableString(transaction.FailureCode()),
+		resultBalance(transaction), resultCurrency(transaction), transaction.AttemptCount(), transaction.NextAttemptAt(),
+		transaction.UpdatedAt(), transaction.ProcessedAt())
 	return mapError(err)
 }
 
 func transactionArgs(transaction *domain.WagerTransaction) []any {
 	return []any{
-		transaction.ID, string(transaction.Origin), transaction.WalletID, transaction.PlayerID, transaction.Currency,
-		nullableString(transaction.ProviderID), nullableString(transaction.ExternalTransactionID), nullableString(transaction.IdempotencyKey), nullableString(transaction.PayloadHash),
-		string(transaction.Kind), transaction.Amount.Units, nullableString(transaction.RoundID), nullableString(transaction.GameID),
-		nullableString(transaction.ReferenceExternalTransactionID), nullableString(transaction.ReferenceTransactionID), string(transaction.Status), nullableString(transaction.FailureCode),
-		resultBalance(transaction), resultCurrency(transaction), transaction.AttemptCount, transaction.NextAttemptAt,
-		transaction.CreatedAt, transaction.UpdatedAt, transaction.ProcessedAt,
+		transaction.ID(), string(transaction.Origin()), transaction.WalletID(), transaction.PlayerID(), transaction.Currency(),
+		nullableString(transaction.ProviderID()), nullableString(transaction.ExternalTransactionID()), nullableString(transaction.IdempotencyKey()), nullableString(transaction.PayloadHash()),
+		string(transaction.Kind()), transaction.Amount().Units(), nullableString(transaction.RoundID()), nullableString(transaction.GameID()),
+		nullableString(transaction.ReferenceExternalTransactionID()), nullableString(transaction.ReferenceTransactionID()), string(transaction.Status()), nullableString(transaction.FailureCode()),
+		resultBalance(transaction), resultCurrency(transaction), transaction.AttemptCount(), transaction.NextAttemptAt(),
+		transaction.CreatedAt(), transaction.UpdatedAt(), transaction.ProcessedAt(),
 	}
 }
 
@@ -76,52 +76,61 @@ func nullableString(value string) any {
 }
 
 func resultBalance(transaction *domain.WagerTransaction) any {
-	if transaction.ResultBalance == nil {
+	if balance := transaction.ResultBalance(); balance == nil {
 		return nil
+	} else {
+		return balance.Units()
 	}
-	return transaction.ResultBalance.Units
 }
 
 func resultCurrency(transaction *domain.WagerTransaction) any {
-	if transaction.ResultBalance == nil {
+	if balance := transaction.ResultBalance(); balance == nil {
 		return nil
+	} else {
+		return balance.Currency()
 	}
-	return transaction.ResultBalance.Currency
 }
 
 func scanTransaction(row rowScanner) (*domain.WagerTransaction, error) {
-	var transaction domain.WagerTransaction
+	var id, walletID, playerID, currency string
 	var origin, kind, status string
 	var providerID, externalID, idempotencyKey, payloadHash *string
 	var roundID, gameID, referenceExternalID, referenceID, failureCode *string
+	var amountMinor int64
+	var attemptCount int
+	var createdAt, updatedAt time.Time
 	var resultBalance *int64
 	var resultCurrency *string
 	var nextAttemptAt, processedAt *time.Time
-	if err := row.Scan(&transaction.ID, &origin, &transaction.WalletID, &transaction.PlayerID, &transaction.Currency,
-		&providerID, &externalID, &idempotencyKey, &payloadHash, &kind, &transaction.Amount.Units,
+	if err := row.Scan(&id, &origin, &walletID, &playerID, &currency,
+		&providerID, &externalID, &idempotencyKey, &payloadHash, &kind, &amountMinor,
 		&roundID, &gameID, &referenceExternalID, &referenceID, &status, &failureCode, &resultBalance,
-		&resultCurrency, &transaction.AttemptCount, &nextAttemptAt, &transaction.CreatedAt, &transaction.UpdatedAt, &processedAt); err != nil {
+		&resultCurrency, &attemptCount, &nextAttemptAt, &createdAt, &updatedAt, &processedAt); err != nil {
 		return nil, mapError(err)
 	}
-	transaction.Origin, transaction.Kind, transaction.Status = domain.TransactionOrigin(origin), domain.TransactionKind(kind), domain.TransactionStatus(status)
-	transaction.Amount.Currency = transaction.Currency
-	transaction.ProviderID = valueOf(providerID)
-	transaction.ExternalTransactionID = valueOf(externalID)
-	transaction.IdempotencyKey = valueOf(idempotencyKey)
-	transaction.PayloadHash = valueOf(payloadHash)
-	transaction.RoundID = valueOf(roundID)
-	transaction.GameID = valueOf(gameID)
-	transaction.ReferenceExternalTransactionID = valueOf(referenceExternalID)
-	transaction.ReferenceTransactionID = valueOf(referenceID)
-	transaction.FailureCode = valueOf(failureCode)
-	transaction.NextAttemptAt, transaction.ProcessedAt = nextAttemptAt, processedAt
+	amount, err := domain.NewMoney(amountMinor, currency)
+	if err != nil {
+		return nil, err
+	}
+	var result *domain.Money
 	if resultBalance != nil {
 		if resultCurrency == nil {
-			return nil, fmt.Errorf("transaction %s has result without currency", transaction.ID)
+			return nil, fmt.Errorf("transaction %s has result without currency", id)
 		}
-		transaction.ResultBalance = &domain.Money{Units: *resultBalance, Currency: *resultCurrency}
+		money, err := domain.NewMoney(*resultBalance, *resultCurrency)
+		if err != nil {
+			return nil, err
+		}
+		result = &money
 	}
-	return &transaction, nil
+	return domain.RehydrateWagerTransaction(domain.WagerTransactionState{
+		ID: id, Origin: domain.TransactionOrigin(origin), WalletID: walletID, PlayerID: playerID, Currency: currency,
+		ProviderID: valueOf(providerID), ExternalTransactionID: valueOf(externalID), IdempotencyKey: valueOf(idempotencyKey), PayloadHash: valueOf(payloadHash),
+		Kind: domain.TransactionKind(kind), Amount: amount, RoundID: valueOf(roundID), GameID: valueOf(gameID),
+		ReferenceExternalTransactionID: valueOf(referenceExternalID), ReferenceTransactionID: valueOf(referenceID),
+		Status: domain.TransactionStatus(status), FailureCode: valueOf(failureCode), ResultBalance: result,
+		CreatedAt: createdAt, UpdatedAt: updatedAt, ProcessedAt: processedAt, AttemptCount: attemptCount, NextAttemptAt: nextAttemptAt,
+	})
 }
 
 func valueOf(value *string) string {

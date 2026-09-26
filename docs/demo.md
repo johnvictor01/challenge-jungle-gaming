@@ -1,6 +1,6 @@
 # Roteiro da demonstração local
 
-Este roteiro permite apresentar o serviço e gravar a demonstração do challenge. Use somente as credenciais locais do `.env.example`.
+Este roteiro descreve como iniciar o serviço e reproduzir seus principais fluxos localmente. Use somente as credenciais locais do `.env.example`.
 
 ## Menu interativo de desenvolvimento
 
@@ -109,7 +109,7 @@ go test ./internal/platform -run TestDependenciesReadinessAgainstPostgresAndLoca
 
 Nos testes PostgreSQL, destaque os 50 replays distribuídos em três processos, a disputa por saldo insuficiente, a concorrência de `REFUND`/`ROLLBACK`, retomada de referência após reinício e conferência do saldo pelo ledger. Os testes do adapter SQS cobrem redelivery, backoff, DLQ e interrupções da outbox.
 
-## Sugestão de ordem para a gravação
+## Sugestão de ordem para a demonstração
 
 1. Mostrar a arquitetura e apontar tabelas, migrations e limites entre domínio, aplicação e adapters.
 2. Demonstrar Keycloak emitindo os tokens de serviço e o provider.

@@ -99,4 +99,5 @@ type OutboxDispatchRepository interface {
 	Claim(ctx context.Context, owner string, limit int, lease time.Duration) ([]OutboxEvent, error)
 	MarkPublished(ctx context.Context, eventID, owner string, publishedAt time.Time) error
 	ScheduleRetry(ctx context.Context, eventID, owner string, nextAttemptAt time.Time, lastError string) error
+	MarkFailed(ctx context.Context, eventID, owner, lastError string) error
 }

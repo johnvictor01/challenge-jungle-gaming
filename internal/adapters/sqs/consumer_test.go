@@ -60,7 +60,7 @@ func TestConsumerDeletesOnlyAfterTransactionalProcessorSucceeds(t *testing.T) {
 	if client.deleted != 1 || processor.calls != 1 {
 		t.Fatalf("deleted=%d processor calls=%d", client.deleted, processor.calls)
 	}
-	if processor.command.MessageID != "stable-message-id" || processor.command.Wager.IdempotencyKey != "provider-a:transaction-1" || processor.command.Wager.Amount.Units != 2500 {
+	if processor.command.MessageID != "stable-message-id" || processor.command.Wager.IdempotencyKey != "provider-a:transaction-1" || processor.command.Wager.Amount.Units() != 2500 {
 		t.Fatalf("unexpected inbox command: %+v", processor.command)
 	}
 }

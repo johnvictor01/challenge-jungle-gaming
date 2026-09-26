@@ -45,59 +45,59 @@ func TestPostgresStoreProcessesWagerAtomically(t *testing.T) {
 	open := application.NewOpenWalletService(store, ids)
 	opened, err := open.Execute(context.Background(), application.OpenWalletCommand{
 		PlayerID:       integrationPlayerID(t),
-		InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+		InitialBalance: testMoney(10_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatalf("open wallet: %v", err)
 	}
 	process := application.NewProcessWagerService(store, ids)
 	command := application.ProcessWagerCommand{
-		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "integration-provider-" + operationID,
+		WalletID: opened.Wallet.ID(), PlayerID: opened.Wallet.PlayerID(), ProviderID: "integration-provider-" + operationID,
 		ExternalTransactionID: "integration-bet-" + operationID, IdempotencyKey: "integration-idem-" + operationID,
 		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet,
-		Amount: domain.Money{Units: 2_500, Currency: "BRL"},
+		Amount: testMoney(2_500, "BRL"),
 	}
 	result, err := process.Execute(context.Background(), command)
 	if err != nil {
 		t.Fatalf("process wager: %v", err)
 	}
-	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units != 7_500 {
+	if result.Status != domain.TransactionProcessed || result.Balance == nil || result.Balance.Units() != 7_500 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	replay, err := process.Execute(context.Background(), command)
-	if err != nil || !replay.IdempotentReplay || replay.Balance == nil || replay.Balance.Units != 7_500 {
+	if err != nil || !replay.IdempotentReplay || replay.Balance == nil || replay.Balance.Units() != 7_500 {
 		t.Fatalf("unexpected persisted replay: result=%+v error=%v", replay, err)
 	}
 
 	var balance int64
 	var version int64
-	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor, version FROM wallets WHERE id = $1", opened.Wallet.ID).Scan(&balance, &version); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor, version FROM wallets WHERE id = $1", opened.Wallet.ID()).Scan(&balance, &version); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 7_500 || version != 2 {
 		t.Errorf("wallet = balance:%d version:%d, want 7500/2", balance, version)
 	}
 	var ledgerCount, eventCount int
-	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id = $1", opened.Wallet.ID).Scan(&ledgerCount); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id = $1", opened.Wallet.ID()).Scan(&ledgerCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM outbox_events WHERE aggregate_id = $1", opened.Wallet.ID).Scan(&eventCount); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM outbox_events WHERE aggregate_id = $1", opened.Wallet.ID()).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
 	if ledgerCount != 2 || eventCount != 4 {
 		t.Errorf("ledger/events = %d/%d, want 2/4", ledgerCount, eventCount)
 	}
 	queries := application.NewQueryService(store)
-	reconciliation, err := queries.Reconcile(context.Background(), opened.Wallet.ID)
+	reconciliation, err := queries.Reconcile(context.Background(), opened.Wallet.ID())
 	if err != nil || !reconciliation.Consistent || reconciliation.CheckedEntries != 2 {
 		t.Errorf("reconciliation = %+v, error=%v", reconciliation, err)
 	}
-	firstPage, err := queries.Ledger(context.Background(), opened.Wallet.ID, "", 1)
+	firstPage, err := queries.Ledger(context.Background(), opened.Wallet.ID(), "", 1)
 	if err != nil || len(firstPage.Entries) != 1 || firstPage.NextCursor == "" {
 		t.Fatalf("first ledger page=%+v error=%v", firstPage, err)
 	}
-	secondPage, err := queries.Ledger(context.Background(), opened.Wallet.ID, firstPage.NextCursor, 1)
-	if err != nil || len(secondPage.Entries) != 1 || firstPage.Entries[0].ID == secondPage.Entries[0].ID {
+	secondPage, err := queries.Ledger(context.Background(), opened.Wallet.ID(), firstPage.NextCursor, 1)
+	if err != nil || len(secondPage.Entries) != 1 || firstPage.Entries[0].ID() == secondPage.Entries[0].ID() {
 		t.Fatalf("second ledger page=%+v error=%v", secondPage, err)
 	}
 }
@@ -107,12 +107,12 @@ func TestPostgresLedgerIsAppendOnly(t *testing.T) {
 	ids := application.UUIDGenerator{}
 	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
 		PlayerID:       integrationPlayerID(t),
-		InitialBalance: domain.Money{Units: 1_000, Currency: "BRL"},
+		InitialBalance: testMoney(1_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatalf("open wallet: %v", err)
 	}
-	_, err = store.pool.Exec(context.Background(), "DELETE FROM wallet_ledger_entries WHERE wallet_id = $1", opened.Wallet.ID)
+	_, err = store.pool.Exec(context.Background(), "DELETE FROM wallet_ledger_entries WHERE wallet_id = $1", opened.Wallet.ID())
 	if err == nil {
 		t.Fatal("DELETE ledger entry succeeded, want append-only trigger error")
 	}
@@ -123,23 +123,23 @@ func TestPostgresEnforcesWalletUniquenessAndProviderIsolation(t *testing.T) {
 	ids := application.UUIDGenerator{}
 	playerID := integrationPlayerID(t)
 	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
-		PlayerID: playerID, InitialBalance: domain.Money{Units: 1_000, Currency: "BRL"},
+		PlayerID: playerID, InitialBalance: testMoney(1_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatalf("open wallet: %v", err)
 	}
 	_, err = application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
-		PlayerID: playerID, InitialBalance: domain.Money{Currency: "BRL"},
+		PlayerID: playerID, InitialBalance: domain.Money{},
 	})
 	if err != application.ErrWalletAlreadyExists {
 		t.Fatalf("duplicate wallet error = %v, want ErrWalletAlreadyExists", err)
 	}
 	process := application.NewProcessWagerService(store, ids)
 	_, err = process.Execute(context.Background(), application.ProcessWagerCommand{
-		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "provider-owned-" + playerID,
+		WalletID: opened.Wallet.ID(), PlayerID: opened.Wallet.PlayerID(), ProviderID: "provider-owned-" + playerID,
 		ExternalTransactionID: "provider-tx-" + playerID, IdempotencyKey: "provider-key-" + playerID,
 		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionLoss,
-		Amount: domain.Money{Currency: "BRL"},
+		Amount: domain.Money{},
 	})
 	if err != nil {
 		t.Fatalf("create provider transaction: %v", err)
@@ -156,7 +156,7 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 	operationID := integrationPlayerID(t)
 	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
 		PlayerID:       integrationPlayerID(t),
-		InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+		InitialBalance: testMoney(10_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatalf("open wallet: %v", err)
@@ -197,7 +197,7 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 		t.Fatalf("duplicate operation did not return one consistent persisted outcome: %+v", byTransactionID)
 	}
 	var balance int64
-	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID).Scan(&balance); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID()).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 2_000 {
@@ -209,7 +209,7 @@ func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *te
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
 	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
-		PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+		PlayerID: integrationPlayerID(t), InitialBalance: testMoney(10_000, "BRL"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *te
 		t.Fatalf("distinct transaction IDs=%d, want exactly one", len(transactionIDs))
 	}
 	var balance int64
-	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id=$1", opened.Wallet.ID).Scan(&balance); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id=$1", opened.Wallet.ID()).Scan(&balance); err != nil {
 		t.Fatal(err)
 	}
 	if balance != 7_500 {
@@ -248,7 +248,7 @@ func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *te
 	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wager_transactions WHERE provider_id=$1 AND idempotency_key=$2", command.ProviderID, command.IdempotencyKey).Scan(&transactionCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id=$1", opened.Wallet.ID).Scan(&ledgerCount); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id=$1", opened.Wallet.ID()).Scan(&ledgerCount); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM outbox_events WHERE causation_id=$1", results[0].TransactionID).Scan(&eventCount); err != nil {
@@ -257,7 +257,7 @@ func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *te
 	if transactionCount != 1 || ledgerCount != 2 || eventCount != 2 {
 		t.Fatalf("transaction/ledger/wager-outbox counts=%d/%d/%d, want 1/2/2", transactionCount, ledgerCount, eventCount)
 	}
-	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID)
+	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID())
 	if err != nil || !reconciliation.Consistent {
 		t.Fatalf("reconciliation=%+v error=%v", reconciliation, err)
 	}
@@ -267,11 +267,11 @@ func TestPostgresDifferentWalletsProcessInParallelAndReconcileWithLedger(t *test
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
 	open := application.NewOpenWalletService(store, ids)
-	first, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	first, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(10_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 20_000, Currency: "BRL"}})
+	second, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(20_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,9 +290,9 @@ func TestPostgresDifferentWalletsProcessInParallelAndReconcileWithLedger(t *test
 		walletID string
 		balance  int64
 		entries  int64
-	}{{first.Wallet.ID, 8_000, 2}, {second.Wallet.ID, 17_000, 2}} {
+	}{{first.Wallet.ID(), 8_000, 2}, {second.Wallet.ID(), 17_000, 2}} {
 		reconciliation, err := queries.Reconcile(context.Background(), expected.walletID)
-		if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != expected.balance || reconciliation.CalculatedBalance.Units != expected.balance || reconciliation.CheckedEntries != expected.entries {
+		if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units() != expected.balance || reconciliation.CalculatedBalance.Units() != expected.balance || reconciliation.CheckedEntries != expected.entries {
 			t.Errorf("reconciliation for wallet %s = %+v error=%v, want balance=%d entries=%d", expected.walletID, reconciliation, err, expected.balance, expected.entries)
 		}
 	}
@@ -302,7 +302,7 @@ func TestPostgresConcurrentRefundAndRollbackApplyOnlyOneReversal(t *testing.T) {
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
 	operationID := integrationPlayerID(t)
-	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(10_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,14 +346,14 @@ func TestPostgresConcurrentRefundAndRollbackApplyOnlyOneReversal(t *testing.T) {
 		t.Fatalf("duplicate reversal did not return its persisted outcome: %+v", byTransactionID)
 	}
 	var reversals int
-	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wager_transactions WHERE wallet_id=$1 AND kind IN ('REFUND','ROLLBACK') AND status='PROCESSED'", opened.Wallet.ID).Scan(&reversals); err != nil {
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wager_transactions WHERE wallet_id=$1 AND kind IN ('REFUND','ROLLBACK') AND status='PROCESSED'", opened.Wallet.ID()).Scan(&reversals); err != nil {
 		t.Fatal(err)
 	}
 	if reversals != 1 {
 		t.Fatalf("processed reversal count=%d, want 1", reversals)
 	}
-	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID)
-	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != 10_000 || reconciliation.CheckedEntries != 3 {
+	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID())
+	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units() != 10_000 || reconciliation.CheckedEntries != 3 {
 		t.Fatalf("reconciliation=%+v error=%v, want balance 10000 and three ledger entries", reconciliation, err)
 	}
 }
@@ -362,7 +362,7 @@ func TestPostgresEnforcesWalletCurrencyAndExternalIdempotencyConstraints(t *test
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
 	playerID := integrationPlayerID(t)
-	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: playerID, InitialBalance: domain.Money{Units: 5_000, Currency: "BRL"}})
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: playerID, InitialBalance: testMoney(5_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestPostgresEnforcesWalletCurrencyAndExternalIdempotencyConstraints(t *test
 	_, err = store.pool.Exec(context.Background(), `INSERT INTO wallets (id, player_id, currency, balance_minor, version, created_at, updated_at)
 		VALUES ($1,$2,'BRL',0,1,now(),now())`, duplicateID, playerID)
 	assertUniqueConstraint(t, err, "wallet player/currency unique index")
-	_, err = store.pool.Exec(context.Background(), "UPDATE wallets SET balance_minor=-1 WHERE id=$1", opened.Wallet.ID)
+	_, err = store.pool.Exec(context.Background(), "UPDATE wallets SET balance_minor=-1 WHERE id=$1", opened.Wallet.ID())
 	assertPostgresConstraintCode(t, err, "23514", "wallet non-negative balance check")
 
 	command := integrationBetCommand(opened.Wallet, integrationPlayerID(t), "unique-source", 500)
@@ -397,7 +397,7 @@ func TestPostgresRejectedReversalDoesNotReserveReference(t *testing.T) {
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
 	operationID := integrationPlayerID(t)
-	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(10_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,16 +450,16 @@ func assertPostgresConstraintCode(t *testing.T, err error, code, constraint stri
 func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
-	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 5_000, Currency: "BRL"}})
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(5_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	operationID := integrationPlayerID(t)
 	pending := application.ProcessWagerCommand{
-		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "pending-provider-" + operationID,
+		WalletID: opened.Wallet.ID(), PlayerID: opened.Wallet.PlayerID(), ProviderID: "pending-provider-" + operationID,
 		ExternalTransactionID: "late-refund-" + operationID, IdempotencyKey: "late-refund-key-" + operationID,
 		RoundID: "round-pending", GameID: "game-pending", Kind: domain.TransactionRefund,
-		Amount: domain.Money{Units: 2_500, Currency: "BRL"}, ReferenceExternalTransactionID: "late-bet-" + operationID,
+		Amount: testMoney(2_500, "BRL"), ReferenceExternalTransactionID: "late-bet-" + operationID,
 	}
 	pendingResult, err := application.NewProcessWagerService(store, ids).Execute(context.Background(), pending)
 	if err != nil || pendingResult.Status != domain.TransactionPendingReference {
@@ -474,10 +474,10 @@ func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
 	}
 	defer restartedStore.Close()
 	bet := application.ProcessWagerCommand{
-		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: pending.ProviderID,
+		WalletID: opened.Wallet.ID(), PlayerID: opened.Wallet.PlayerID(), ProviderID: pending.ProviderID,
 		ExternalTransactionID: pending.ReferenceExternalTransactionID, IdempotencyKey: "late-bet-key-" + operationID,
 		RoundID: pending.RoundID, GameID: "game-pending", Kind: domain.TransactionBet,
-		Amount: domain.Money{Units: 2_500, Currency: "BRL"},
+		Amount: testMoney(2_500, "BRL"),
 	}
 	betResult, err := application.NewProcessWagerService(restartedStore, ids).Execute(context.Background(), bet)
 	if err != nil || betResult.Status != domain.TransactionProcessed {
@@ -492,20 +492,20 @@ func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved, err := application.NewQueryService(restartedStore).Transaction(context.Background(), pendingResult.TransactionID)
-	if err != nil || resolved.Status != domain.TransactionProcessed || resolved.ResultBalance == nil || resolved.ResultBalance.Units != 5_000 {
+	if err != nil || resolved.Status() != domain.TransactionProcessed || resolved.ResultBalance() == nil || resolved.ResultBalance().Units() != 5_000 {
 		t.Fatalf("resumed operation = %+v error=%v, want PROCESSED with balance 5000", resolved, err)
 	}
-	reconciliation, err := application.NewQueryService(restartedStore).Reconcile(context.Background(), opened.Wallet.ID)
-	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != 5_000 || reconciliation.CalculatedBalance.Units != 5_000 || reconciliation.CheckedEntries != 3 {
+	reconciliation, err := application.NewQueryService(restartedStore).Reconcile(context.Background(), opened.Wallet.ID())
+	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units() != 5_000 || reconciliation.CalculatedBalance.Units() != 5_000 || reconciliation.CheckedEntries != 3 {
 		t.Fatalf("reconciliation=%+v error=%v, want consistent balance 5000 with opening, bet, and refund entries", reconciliation, err)
 	}
 }
 
 func integrationBetCommand(wallet *domain.Wallet, operationID, suffix string, amount int64) application.ProcessWagerCommand {
 	return application.ProcessWagerCommand{
-		WalletID: wallet.ID, PlayerID: wallet.PlayerID, ProviderID: "concurrent-provider-" + operationID,
+		WalletID: wallet.ID(), PlayerID: wallet.PlayerID(), ProviderID: "concurrent-provider-" + operationID,
 		ExternalTransactionID: "concurrent-bet-" + suffix + "-" + operationID, IdempotencyKey: "concurrent-key-" + suffix + "-" + operationID,
-		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: amount, Currency: "BRL"},
+		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet, Amount: testMoney(amount, "BRL"),
 	}
 }
 
@@ -653,11 +653,11 @@ func TestPostgresOutboxClaimsAreExclusiveAndPreserveAggregateOrder(t *testing.T)
 	})
 	ids := application.UUIDGenerator{}
 	open := application.NewOpenWalletService(store, ids)
-	firstWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 1_000, Currency: "BRL"}})
+	firstWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(1_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 2_000, Currency: "BRL"}})
+	secondWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: testMoney(2_000, "BRL")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,7 +687,7 @@ func TestPostgresOutboxClaimsAreExclusiveAndPreserveAggregateOrder(t *testing.T)
 		t.Fatal("publishers claimed two ordered events from the same wallet instead of parallel wallet aggregates")
 	}
 	claimedAggregate := map[string]bool{firstClaim[0].AggregateID: true, secondClaim[0].AggregateID: true}
-	if !claimedAggregate[firstWallet.Wallet.ID] || !claimedAggregate[secondWallet.Wallet.ID] {
+	if !claimedAggregate[firstWallet.Wallet.ID()] || !claimedAggregate[secondWallet.Wallet.ID()] {
 		t.Fatal("independent wallet aggregates were not processed in parallel")
 	}
 	blocked, err := repository.Claim(context.Background(), "publisher-c", 10, time.Minute)

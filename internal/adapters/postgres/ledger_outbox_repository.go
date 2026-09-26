@@ -19,8 +19,8 @@ func (r ledgerRepository) Create(ctx context.Context, entry *domain.WalletLedger
         (id, wallet_id, transaction_id, direction, amount_minor, currency,
          balance_before_minor, balance_after_minor, created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		entry.ID, entry.WalletID, entry.TransactionID, string(entry.Direction), entry.Amount.Units,
-		entry.Amount.Currency, entry.BalanceBefore.Units, entry.BalanceAfter.Units, entry.CreatedAt)
+		entry.ID(), entry.WalletID(), entry.TransactionID(), string(entry.Direction()), entry.Amount().Units(),
+		entry.Amount().Currency(), entry.BalanceBefore().Units(), entry.BalanceAfter().Units(), entry.CreatedAt())
 	return mapError(err)
 }
 
@@ -46,8 +46,19 @@ func (r ledgerRepository) ListByWallet(ctx context.Context, walletID string, aft
 		if err := rows.Scan(&id, &walletID, &transactionID, &direction, &amount, &currency, &before, &after, &createdAt); err != nil {
 			return nil, mapError(err)
 		}
-		entry, err := domain.RehydrateWalletLedgerEntry(id, walletID, transactionID, domain.Direction(direction),
-			domain.Money{Units: amount, Currency: currency}, domain.Money{Units: before, Currency: currency}, domain.Money{Units: after, Currency: currency}, createdAt)
+		amountMoney, err := domain.NewMoney(amount, currency)
+		if err != nil {
+			return nil, err
+		}
+		beforeMoney, err := domain.NewMoney(before, currency)
+		if err != nil {
+			return nil, err
+		}
+		afterMoney, err := domain.NewMoney(after, currency)
+		if err != nil {
+			return nil, err
+		}
+		entry, err := domain.RehydrateWalletLedgerEntry(id, walletID, transactionID, domain.Direction(direction), amountMoney, beforeMoney, afterMoney, createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -98,11 +109,11 @@ func (r *OutboxDispatcherRepository) Claim(ctx context.Context, owner string, li
 	defer func() { _ = tx.Rollback(ctx) }()
 	rows, err := tx.Query(ctx, `WITH candidates AS (
 		SELECT e.event_id FROM outbox_events AS e
-		WHERE e.published_at IS NULL AND e.next_attempt_at <= now()
+		WHERE e.published_at IS NULL AND NOT e.failed AND e.next_attempt_at <= now()
 		  AND (e.lease_until IS NULL OR e.lease_until <= now())
 		  AND NOT EXISTS (
 			SELECT 1 FROM outbox_events AS earlier
-			WHERE earlier.aggregate_id = e.aggregate_id AND earlier.published_at IS NULL
+			WHERE earlier.aggregate_id = e.aggregate_id AND earlier.published_at IS NULL AND NOT earlier.failed
 			  AND (earlier.occurred_at, earlier.event_id) < (e.occurred_at, e.event_id)
 		  )
 		ORDER BY e.occurred_at, e.event_id
@@ -111,8 +122,8 @@ func (r *OutboxDispatcherRepository) Claim(ctx context.Context, owner string, li
 	UPDATE outbox_events AS e
 	SET lease_owner = $2, lease_until = now() + $3::interval, attempts = attempts + 1
 	FROM candidates c WHERE e.event_id = c.event_id
-	RETURNING e.event_id, e.event_type, e.aggregate_id, e.event_version,
-	          e.correlation_id, e.causation_id, e.payload, e.occurred_at, e.attempts`,
+		RETURNING e.event_id, e.event_type, e.aggregate_id, e.event_version,
+		          e.correlation_id, e.causation_id, e.payload, e.occurred_at, e.attempts, e.failed`,
 		limit, owner, lease.String())
 	if err != nil {
 		return nil, mapError(err)
@@ -124,7 +135,7 @@ func (r *OutboxDispatcherRepository) Claim(ctx context.Context, owner string, li
 		var causation *string
 		var data []byte
 		if err := rows.Scan(&event.EventID, &event.EventType, &event.AggregateID, &event.Version,
-			&event.CorrelationID, &causation, &data, &event.OccurredAt, &event.Attempts); err != nil {
+			&event.CorrelationID, &causation, &data, &event.OccurredAt, &event.Attempts, &event.Failed); err != nil {
 			return nil, mapError(err)
 		}
 		if causation != nil {
@@ -159,6 +170,19 @@ func (r *OutboxDispatcherRepository) ScheduleRetry(ctx context.Context, eventID,
 	tag, err := r.pool.Exec(ctx, `UPDATE outbox_events
 		SET next_attempt_at = $3, lease_owner = NULL, lease_until = NULL, last_error = $4
 		WHERE event_id = $1 AND lease_owner = $2 AND published_at IS NULL`, eventID, owner, nextAttemptAt, lastError)
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return application.ErrOutboxLeaseLost
+	}
+	return nil
+}
+
+func (r *OutboxDispatcherRepository) MarkFailed(ctx context.Context, eventID, owner, lastError string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE outbox_events
+		SET failed = TRUE, lease_owner = NULL, lease_until = NULL, last_error = $3
+		WHERE event_id = $1 AND lease_owner = $2 AND published_at IS NULL AND NOT failed`, eventID, owner, lastError)
 	if err != nil {
 		return mapError(err)
 	}

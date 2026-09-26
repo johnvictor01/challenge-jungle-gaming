@@ -224,7 +224,7 @@ func (h *Handler) getTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := principalFrom(r.Context())
-	if transaction.Origin != domain.TransactionExternal || transaction.ProviderID != principal.ProviderID {
+	if transaction.Origin() != domain.TransactionExternal || transaction.ProviderID() != principal.ProviderID {
 		writeError(w, http.StatusNotFound, "not_found", "transaction not found")
 		return
 	}
@@ -356,12 +356,12 @@ type reconciliationResponse struct {
 }
 
 func moneyResponseFrom(money domain.Money) moneyResponse {
-	amount := strings.TrimSuffix(money.String(), " "+money.Currency)
-	return moneyResponse{Amount: amount, Currency: money.Currency}
+	amount := strings.TrimSuffix(money.String(), " "+money.Currency())
+	return moneyResponse{Amount: amount, Currency: money.Currency()}
 }
 
 func walletResponseFrom(wallet *domain.Wallet) walletResponse {
-	return walletResponse{ID: wallet.ID, Player: wallet.PlayerID, Balance: moneyResponseFrom(wallet.Balance), Version: wallet.Version}
+	return walletResponse{ID: wallet.ID(), Player: wallet.PlayerID(), Balance: moneyResponseFrom(wallet.Balance()), Version: wallet.Version()}
 }
 
 func wagerResponseFrom(result application.ProcessWagerResult) wagerResponse {
@@ -375,20 +375,20 @@ func wagerResponseFrom(result application.ProcessWagerResult) wagerResponse {
 
 func transactionResponseFrom(transaction *domain.WagerTransaction) transactionResponse {
 	response := transactionResponse{
-		TransactionID: transaction.ID, ProviderID: transaction.ProviderID, ExternalTransactionID: transaction.ExternalTransactionID,
-		PlayerID: transaction.PlayerID, WalletID: transaction.WalletID, RoundID: transaction.RoundID, GameID: transaction.GameID,
-		Kind: string(transaction.Kind), Status: string(transaction.Status), Money: moneyResponseFrom(transaction.Amount),
-		ReferenceExternalTransactionID: transaction.ReferenceExternalTransactionID, FailureCode: transaction.FailureCode,
+		TransactionID: transaction.ID(), ProviderID: transaction.ProviderID(), ExternalTransactionID: transaction.ExternalTransactionID(),
+		PlayerID: transaction.PlayerID(), WalletID: transaction.WalletID(), RoundID: transaction.RoundID(), GameID: transaction.GameID(),
+		Kind: string(transaction.Kind()), Status: string(transaction.Status()), Money: moneyResponseFrom(transaction.Amount()),
+		ReferenceExternalTransactionID: transaction.ReferenceExternalTransactionID(), FailureCode: transaction.FailureCode(),
 	}
-	if transaction.ResultBalance != nil {
-		balance := moneyResponseFrom(*transaction.ResultBalance)
+	if resultBalance := transaction.ResultBalance(); resultBalance != nil {
+		balance := moneyResponseFrom(*resultBalance)
 		response.Balance = &balance
 	}
 	return response
 }
 
 func ledgerResponseFrom(entry *domain.WalletLedgerEntry) ledgerResponse {
-	return ledgerResponse{ID: entry.ID, TransactionID: entry.TransactionID, Direction: string(entry.Direction), Money: moneyResponseFrom(entry.Amount), BalanceBefore: moneyResponseFrom(entry.BalanceBefore), BalanceAfter: moneyResponseFrom(entry.BalanceAfter), CreatedAt: entry.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")}
+	return ledgerResponse{ID: entry.ID(), TransactionID: entry.TransactionID(), Direction: string(entry.Direction()), Money: moneyResponseFrom(entry.Amount()), BalanceBefore: moneyResponseFrom(entry.BalanceBefore()), BalanceAfter: moneyResponseFrom(entry.BalanceAfter()), CreatedAt: entry.CreatedAt().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

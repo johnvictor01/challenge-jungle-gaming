@@ -14,6 +14,7 @@ type dispatchRepository struct {
 	retries      map[string]time.Time
 	claimErr     error
 	markFailures int
+	failed       []string
 }
 
 func (r *dispatchRepository) Claim(context.Context, string, int, time.Duration) ([]OutboxEvent, error) {
@@ -61,6 +62,10 @@ func (r *dispatchRepository) ScheduleRetry(_ context.Context, id, _ string, next
 	r.retries[id] = next
 	return nil
 }
+func (r *dispatchRepository) MarkFailed(_ context.Context, id, _ string, _ string) error {
+	r.failed = append(r.failed, id)
+	return nil
+}
 
 type dispatchPublisher struct {
 	err    error
@@ -106,6 +111,21 @@ func TestOutboxDispatcherSchedulesExponentialRetryAfterPublishFailure(t *testing
 	}
 	if len(repo.published) != 0 {
 		t.Fatal("failed event must not be marked published")
+	}
+}
+
+func TestOutboxDispatcherMarksEventFailedAtAttemptLimit(t *testing.T) {
+	repo := &dispatchRepository{events: []OutboxEvent{{EventID: "event-terminal", Attempts: 3}}}
+	publisher := &dispatchPublisher{err: errors.New("permanent broker rejection")}
+	dispatcher, err := NewOutboxDispatcher(repo, publisher, OutboxDispatchConfig{Owner: "worker-a", MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatcher.DispatchBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.failed) != 1 || repo.failed[0] != "event-terminal" || len(repo.retries) != 0 {
+		t.Fatalf("failed=%v retries=%v", repo.failed, repo.retries)
 	}
 }
 

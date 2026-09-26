@@ -11,7 +11,7 @@ func TestParseMoney(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseMoney retornou erro: %v", err)
 	}
-	if got.Units != 2500 || got.Currency != "BRL" {
+	if got.Units() != 2500 || got.Currency() != "BRL" {
 		t.Errorf("resultado inesperado: %+v", got)
 	}
 }
@@ -47,7 +47,7 @@ func TestMoneyZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseMoney retornou erro: %v", err)
 	}
-	if got.Units != 0 || got.Currency != "BRL" {
+	if got.Units() != 0 || got.Currency() != "BRL" {
 		t.Errorf("resultado inesperado: %+v", got)
 	}
 }
@@ -64,14 +64,14 @@ func TestMoneyAdd(t *testing.T) {
 		{1<<63 - 1, 1, 0, ErrOverflow},
 	}
 	for _, tc := range cases {
-		got, err := (Money{Units: tc.a, Currency: "BRL"}).Add(Money{Units: tc.b, Currency: "BRL"})
+		got, err := (Money{units: tc.a, currency: "BRL"}).Add(Money{units: tc.b, currency: "BRL"})
 		if tc.wantErr != nil {
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("Add(%d, %d): esperava %v, recebeu %v", tc.a, tc.b, tc.wantErr, err)
 			}
 			continue
 		}
-		if err != nil || got.Units != tc.want {
+		if err != nil || got.Units() != tc.want {
 			t.Errorf("Add(%d, %d) = %+v, %v; esperado Units=%d", tc.a, tc.b, got, err, tc.want)
 		}
 	}
@@ -90,14 +90,14 @@ func TestMoneySubtract(t *testing.T) {
 		{1<<63 - 1, -1, 0, ErrOverflow},
 	}
 	for _, tc := range cases {
-		got, err := (Money{Units: tc.a, Currency: "BRL"}).Subtract(Money{Units: tc.b, Currency: "BRL"})
+		got, err := (Money{units: tc.a, currency: "BRL"}).Subtract(Money{units: tc.b, currency: "BRL"})
 		if tc.wantErr != nil {
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("Subtract(%d, %d): esperava %v, recebeu %v", tc.a, tc.b, tc.wantErr, err)
 			}
 			continue
 		}
-		if err != nil || got.Units != tc.want {
+		if err != nil || got.Units() != tc.want {
 			t.Errorf("Subtract(%d, %d) = %+v, %v; esperado Units=%d", tc.a, tc.b, got, err, tc.want)
 		}
 	}
@@ -111,14 +111,14 @@ func TestMoneyNegate(t *testing.T) {
 		wantErr error
 	}{{1000, -1000, nil}, {-1000, 1000, nil}, {-1 << 63, 0, ErrOverflow}}
 	for _, tc := range cases {
-		got, err := (Money{Units: tc.units, Currency: "BRL"}).Negate()
+		got, err := (Money{units: tc.units, currency: "BRL"}).Negate()
 		if tc.wantErr != nil {
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("Negate(%d): esperava %v, recebeu %v", tc.units, tc.wantErr, err)
 			}
 			continue
 		}
-		if err != nil || got.Units != tc.want {
+		if err != nil || got.Units() != tc.want {
 			t.Errorf("Negate(%d) = %+v, %v; esperado Units=%d", tc.units, got, err, tc.want)
 		}
 	}
@@ -131,7 +131,7 @@ func TestMoneyCompare(t *testing.T) {
 		want int
 	}{{1000, 1500, -1}, {1500, 1000, 1}, {1000, 1000, 0}}
 	for _, tc := range cases {
-		got, err := (Money{Units: tc.a, Currency: "BRL"}).Compare(Money{Units: tc.b, Currency: "BRL"})
+		got, err := (Money{units: tc.a, currency: "BRL"}).Compare(Money{units: tc.b, currency: "BRL"})
 		if err != nil || got != tc.want {
 			t.Errorf("Compare(%d, %d) = %d, %v; esperado %d", tc.a, tc.b, got, err, tc.want)
 		}
@@ -140,8 +140,8 @@ func TestMoneyCompare(t *testing.T) {
 
 // TestMoneyRejectsDifferentCurrencies: aritmética e comparação exigem moedas iguais.
 func TestMoneyRejectsDifferentCurrencies(t *testing.T) {
-	brl := Money{Units: 100, Currency: "BRL"}
-	usd := Money{Units: 100, Currency: "USD"}
+	brl := Money{units: 100, currency: "BRL"}
+	usd := Money{units: 100, currency: "USD"}
 	if _, err := brl.Add(usd); !errors.Is(err, ErrCurrencyMismatch) {
 		t.Errorf("Add: esperava ErrCurrencyMismatch, recebeu %v", err)
 	}
@@ -158,10 +158,10 @@ func TestMoneyString(t *testing.T) {
 	cases := []struct {
 		money Money
 		want  string
-	}{{Money{Units: 1000, Currency: "BRL"}, "10.00 BRL"},
-		{Money{Units: 1, Currency: "USD"}, "0.01 USD"},
-		{Money{Units: -550, Currency: "EUR"}, "-5.50 EUR"},
-		{Money{Units: -1 << 63, Currency: "BRL"}, "-92233720368547758.08 BRL"}}
+	}{{Money{units: 1000, currency: "BRL"}, "10.00 BRL"},
+		{Money{units: 1, currency: "USD"}, "0.01 USD"},
+		{Money{units: -550, currency: "EUR"}, "-5.50 EUR"},
+		{Money{units: -1 << 63, currency: "BRL"}, "-92233720368547758.08 BRL"}}
 	for _, tc := range cases {
 		if got := tc.money.String(); got != tc.want {
 			t.Errorf("String() = %q; esperado %q", got, tc.want)
