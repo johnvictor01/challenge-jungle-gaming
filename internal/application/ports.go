@@ -28,12 +28,32 @@ type UnitOfWork interface {
 	WithinTransaction(ctx context.Context, callback func(Repositories) error) error
 }
 
+// InboxUnitOfWork commits delivery receipt and domain changes atomically.
+type InboxUnitOfWork interface {
+	WithinInboxTransaction(ctx context.Context, consumerName, messageID, payloadHash string, callback func(Repositories, bool) error) error
+}
+
 // Repositories contém os repositórios ligados à mesma transação SQL.
 type Repositories struct {
 	Wallets      WalletRepository
 	Transactions WagerTransactionRepository
 	Ledger       WalletLedgerRepository
 	Outbox       OutboxRepository
+	Inbox        InboxRepository
+}
+
+type InboxRepository interface {
+	Find(ctx context.Context, consumerName, messageID string) (InboxMessage, error)
+	Complete(ctx context.Context, consumerName, messageID, transactionID string, completedAt time.Time) error
+}
+
+type InboxMessage struct {
+	ConsumerName  string
+	MessageID     string
+	PayloadHash   string
+	ReceivedAt    time.Time
+	CompletedAt   *time.Time
+	TransactionID string
 }
 
 // WalletRepository lê e grava carteiras. FindByID deve bloquear a linha durante o UnitOfWork.

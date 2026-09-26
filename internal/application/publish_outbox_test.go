@@ -8,11 +8,12 @@ import (
 )
 
 type dispatchRepository struct {
-	events    []OutboxEvent
-	claimed   []OutboxEvent
-	published []string
-	retries   map[string]time.Time
-	claimErr  error
+	events       []OutboxEvent
+	claimed      []OutboxEvent
+	published    []string
+	retries      map[string]time.Time
+	claimErr     error
+	markFailures int
 }
 
 func (r *dispatchRepository) Claim(context.Context, string, int, time.Duration) ([]OutboxEvent, error) {
@@ -23,8 +24,35 @@ func (r *dispatchRepository) Claim(context.Context, string, int, time.Duration) 
 	return r.claimed, nil
 }
 func (r *dispatchRepository) MarkPublished(_ context.Context, id, _ string, _ time.Time) error {
+	if r.markFailures > 0 {
+		r.markFailures--
+		return errors.New("database unavailable after publish")
+	}
 	r.published = append(r.published, id)
 	return nil
+}
+
+func TestOutboxDispatcherRetainsEventIDWhenPublishSucceedsButConfirmationFails(t *testing.T) {
+	repo := &dispatchRepository{events: []OutboxEvent{{EventID: "stable-event-id"}}, markFailures: 1}
+	publisher := &dispatchPublisher{}
+	dispatcher, err := NewOutboxDispatcher(repo, publisher, OutboxDispatchConfig{Owner: "worker-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatcher.DispatchBatch(context.Background()); err == nil {
+		t.Fatal("expected confirmation failure")
+	}
+	// Another process resumes from the durable repository after restart.
+	dispatcher, err = NewOutboxDispatcher(repo, publisher, OutboxDispatchConfig{Owner: "worker-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatcher.DispatchBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(publisher.events) != 2 || publisher.events[0].EventID != "stable-event-id" || publisher.events[1].EventID != "stable-event-id" {
+		t.Fatalf("republished event identity changed: %+v", publisher.events)
+	}
 }
 func (r *dispatchRepository) ScheduleRetry(_ context.Context, id, _ string, next time.Time, _ string) error {
 	if r.retries == nil {
@@ -73,7 +101,7 @@ func TestOutboxDispatcherSchedulesExponentialRetryAfterPublishFailure(t *testing
 	if _, err := dispatcher.DispatchBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := repo.retries["event-2"], now.Add(4*time.Second); !got.Equal(want) {
+	if got, want := repo.retries["event-2"], now.Add(2*time.Second); !got.Equal(want) {
 		t.Fatalf("retry time = %s, want %s", got, want)
 	}
 	if len(repo.published) != 0 {

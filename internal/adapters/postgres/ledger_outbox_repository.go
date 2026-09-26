@@ -97,11 +97,16 @@ func (r *OutboxDispatcherRepository) Claim(ctx context.Context, owner string, li
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	rows, err := tx.Query(ctx, `WITH candidates AS (
-		SELECT event_id FROM outbox_events
-		WHERE published_at IS NULL AND next_attempt_at <= now()
-		  AND (lease_until IS NULL OR lease_until <= now())
-		ORDER BY occurred_at, event_id
-		FOR UPDATE SKIP LOCKED LIMIT $1
+		SELECT e.event_id FROM outbox_events AS e
+		WHERE e.published_at IS NULL AND e.next_attempt_at <= now()
+		  AND (e.lease_until IS NULL OR e.lease_until <= now())
+		  AND NOT EXISTS (
+			SELECT 1 FROM outbox_events AS earlier
+			WHERE earlier.aggregate_id = e.aggregate_id AND earlier.published_at IS NULL
+			  AND (earlier.occurred_at, earlier.event_id) < (e.occurred_at, e.event_id)
+		  )
+		ORDER BY e.occurred_at, e.event_id
+		FOR UPDATE OF e SKIP LOCKED LIMIT $1
 	)
 	UPDATE outbox_events AS e
 	SET lease_owner = $2, lease_until = now() + $3::interval, attempts = attempts + 1
