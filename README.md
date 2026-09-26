@@ -471,4 +471,6 @@ A API HTTP, a validação OIDC com Keycloak, os casos de uso, o worker de retoma
 
 A auditoria requisito por requisito e as limitações ainda abertas estão em [docs/AUDITORIA_README.md](docs/AUDITORIA_README.md).
 
+Para explorar a API pelo terminal com um menu interativo, execute `python3 scripts/dev_menu.py`; instruções estão em [docs/demo.md](docs/demo.md).
+
 Entregue código formatado com `gofmt` e dependências reproduzíveis.
