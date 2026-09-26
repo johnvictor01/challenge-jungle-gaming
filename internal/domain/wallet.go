@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -32,7 +33,7 @@ type Wallet struct {
 
 // NewWallet cria uma carteira com ID novo, saldo inicial e versão 1.
 func NewWallet(playerID string, currency string, initialBalance int64) (*Wallet, error) {
-	if playerID == "" {
+	if strings.TrimSpace(playerID) == "" {
 		return nil, ErrInvalidPlayerID
 	}
 	if !validCurrency(currency) {
@@ -60,10 +61,10 @@ func NewWallet(playerID string, currency string, initialBalance int64) (*Wallet,
 
 // RehydrateWallet monta uma carteira que já existe no banco sem aplicar movimentações.
 func RehydrateWallet(id string, playerID string, balance Money, version int64, createdAt time.Time, updatedAt time.Time) (*Wallet, error) {
-	if id == "" {
+	if strings.TrimSpace(id) == "" {
 		return nil, ErrInvalidWalletID
 	}
-	if playerID == "" {
+	if strings.TrimSpace(playerID) == "" {
 		return nil, ErrInvalidPlayerID
 	}
 	if !validCurrency(balance.Currency) {

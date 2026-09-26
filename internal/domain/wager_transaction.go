@@ -82,6 +82,8 @@ type WagerTransaction struct {
 	CreatedAt                      time.Time
 	UpdatedAt                      time.Time
 	ProcessedAt                    *time.Time
+	AttemptCount                   int
+	NextAttemptAt                  *time.Time
 }
 
 // NewExternalWagerTransaction valida os campos externos e começa em PENDING.
@@ -178,6 +180,19 @@ func (t *WagerTransaction) WaitForReference() error {
 		return ErrInvalidTransactionState
 	}
 	t.Status = TransactionPendingReference
+	t.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// ScheduleReferenceRetry mantém a operação pendente e registra quando o worker
+// poderá tentar localizar a referência novamente.
+func (t *WagerTransaction) ScheduleReferenceRetry(nextAttemptAt time.Time) error {
+	if t == nil || t.Status != TransactionPendingReference || nextAttemptAt.IsZero() {
+		return ErrInvalidTransactionState
+	}
+	t.AttemptCount++
+	next := nextAttemptAt.UTC()
+	t.NextAttemptAt = &next
 	t.UpdatedAt = time.Now().UTC()
 	return nil
 }
