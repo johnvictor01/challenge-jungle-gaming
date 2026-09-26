@@ -16,6 +16,8 @@ Cada grupo FIFO usa o `aggregateId` como `MessageGroupId`, para que eventos da m
 
 Em `SIGTERM`, o consumer cancela long polling e espera o lote em andamento terminar; trabalho não confirmado permanece no SQS para reentrega depois do visibility timeout. O worker de outbox também encerra com o contexto do Fx. Testes cobrem redelivery depois de falha no delete, retomada por um novo serviço e republicação com o mesmo ID após falha de confirmação.
 
+O worker de referências pendentes também inicia e encerra pelo ciclo de vida do Fx. Ele busca no PostgreSQL operações cujo próximo retry venceu, então não depende de memória local para recuperar após reinício. `/health/ready` consulta PostgreSQL e as filas SQS de entrada e de eventos; `/metrics` inclui contadores de retry/redrive e atraso de publicação.
+
 ## Subir o SQS local
 
 ```sh

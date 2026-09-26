@@ -23,7 +23,8 @@ O realm local em `deploy/keycloak/realm` provisiona um provedor e um client inte
 | Método e rota | Papel | Resposta |
 | --- | --- | --- |
 | `GET /health/live` | Pública | Processo ativo |
-| `GET /health/ready` | Pública | PostgreSQL disponível |
+| `GET /health/ready` | Pública | PostgreSQL, fila SQS de entrada e fila SQS de eventos disponíveis |
+| `GET /metrics` | Pública | Métricas em formato Prometheus |
 | `POST /wallets` | `wallet:write` | `201` e carteira criada |
 | `GET /wallets/{walletID}` | `wallet:read` | Carteira |
 | `GET /wallets/{walletID}/ledger?cursor=&limit=50` | `wallet:read` | Página com cursor opaco |
@@ -70,12 +71,16 @@ set +a
 go test ./internal/adapters/postgres -count=1
 ```
 
-Com PostgreSQL e Keycloak locais ativos e as variáveis `TEST_DATABASE_URL`, `TEST_OIDC_ISSUER_URL`, `TEST_PROVIDER_CLIENT_SECRET` e `TEST_INTERNAL_CLIENT_SECRET` carregadas, execute os fluxos reais:
+Com PostgreSQL e Keycloak locais ativos e as variáveis `TEST_DATABASE_URL`, `TEST_OIDC_ISSUER_URL`, `TEST_PROVIDER_CLIENT_SECRET` e `TEST_INTERNAL_CLIENT_SECRET` carregadas, execute os fluxos reais. O teste de token expirado usa também `KEYCLOAK_ADMIN` e `KEYCLOAK_ADMIN_PASSWORD` para reduzir temporariamente a validade do token no realm local e restaura o valor original ao terminar:
 
 ```sh
 go test ./internal/adapters/http ./internal/adapters/postgres -count=1
 ```
 
-## Estado e limites desta entrega
+## Métricas e readiness
 
-A API consulta PostgreSQL e compartilha os casos de uso com o consumidor SQS. Os testes de integração usam tokens Keycloak reais e PostgreSQL real; a integração SQS/inbox/outbox também tem testes com LocalStack. Métricas e readiness combinada com SQS continuam pendentes.
+`/health/ready` consulta PostgreSQL e consulta atributos nas duas filas SQS configuradas. Se uma dependência falhar, responde `503`. `/health/live` verifica somente que o processo está ativo.
+
+`/metrics` expõe contadores de resultados, replays, conflitos, tentativas SQS, candidatos ao redrive, eventos publicados e divergências de reconciliação, além de contagem e soma de latência do processamento, outbox e reconciliação. As métricas não incluem IDs de jogador, provedor, carteira ou transação.
+
+O fluxo local, incluindo workers e testes de integração, está descrito em [demo.md](demo.md).

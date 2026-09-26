@@ -316,9 +316,10 @@ Reporte divergências na resposta, nos logs e em uma métrica. A reconciliação
 ```http
 GET /health/live
 GET /health/ready
+GET /metrics
 ```
 
-Liveness do processo e readiness de PostgreSQL e SQS.
+Liveness do processo; readiness de PostgreSQL, fila SQS de entrada e fila SQS de eventos. `/metrics` expõe métricas de resultados, duplicatas, retries, conflitos, DLQ, atraso da outbox, latência e divergências de reconciliação.
 
 ## 10. Consumidor SQS
 
@@ -386,7 +387,7 @@ Tipo e versão devem ser definidos pelo construtor do evento. Use timestamps UTC
 
 Produza logs JSON com os identificadores disponíveis para rastrear a operação: `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId`. Não registre credenciais, dados sensíveis ou payloads financeiros completos.
 
-Exponha métricas para resultados por status, duplicatas, retries, DLQ, conflitos de concorrência, atraso da outbox, latência de processamento e divergências de reconciliação.
+Exponha métricas para resultados por status, duplicatas, retries, DLQ, conflitos de concorrência, atraso da outbox, latência de processamento e divergências de reconciliação. A implementação disponibiliza essas métricas em `/metrics`.
 
 Inclua os health checks definidos na API. Tracing com OpenTelemetry e dashboards são diferenciais opcionais.
 
@@ -466,6 +467,6 @@ Documente separadamente como preparar as dependências dos testes e executar int
 
 ## 16. Implementação atual
 
-A API HTTP, a validação OIDC com Keycloak, os casos de uso, o adapter PostgreSQL, o consumidor SQS com inbox transacional e o publisher da outbox estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. Os passos locais e os pontos que ainda faltam, como métricas e readiness combinada, estão em [docs/api-http-oidc.md](docs/api-http-oidc.md) e [docs/implementacao/README.md](docs/implementacao/README.md).
+A API HTTP, a validação OIDC com Keycloak, os casos de uso, o worker de retomada de referências, o adapter PostgreSQL, o consumidor SQS com inbox transacional, o publisher da outbox, métricas e readiness combinada estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. Veja o roteiro de execução e apresentação em [docs/demo.md](docs/demo.md), as decisões em [ARCHITECTURE.md](ARCHITECTURE.md) e a cobertura em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).
 
 Entregue código formatado com `gofmt` e dependências reproduzíveis.
