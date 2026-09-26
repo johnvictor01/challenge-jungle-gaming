@@ -1,86 +1,65 @@
-# Arquitetura inicial
+# Arquitetura
 
-Este documento registra as decisões de arquitetura adotadas até a fase HTTP/OIDC. Domínio, aplicação, migrations, adapter PostgreSQL e API autenticada estão implementados; consumidor SQS e publisher da outbox ficam para a próxima fase.
+Este documento descreve a implementação que existe hoje e suas decisões. A API HTTP, o domínio, a persistência PostgreSQL, a integração OIDC com Keycloak, os workers de retomada, o consumidor SQS com inbox e o publisher da outbox fazem parte da aplicação em `cmd/api`, composta pelo Uber Fx.
 
-## Escopo por etapas
+## Componentes
 
-1. [x] Modelar dados e invariantes do domínio.
-2. [x] Definir o schema PostgreSQL com migrations versionadas.
-3. [x] Cobrir domínio e casos de uso com testes unitários.
-4. [x] Implementar os casos de uso de abertura, operação e retomada de referência.
-5. [x] Implementar persistência PostgreSQL e testes de integração básicos.
-6. [x] Implementar API HTTP, validação OIDC, autorização por papel e reconciliação.
-7. [x] Implementar consumidor SQS, inbox, publisher outbox e testes de recuperação.
+| Componente | Responsabilidade |
+| --- | --- |
+| `internal/domain` | Valores monetários, carteiras, operações, ledger e invariantes puras |
+| `internal/application` | Casos de uso, portas de persistência, hashing idempotente e despacho da outbox |
+| `internal/adapters/http` | Contratos HTTP, autenticação, autorização e respostas |
+| `internal/adapters/postgres` | Repositórios, transações SQL e migrations |
+| `internal/adapters/sqs` | Consumo com inbox, publicação de eventos e integração AWS SDK |
+| `internal/platform` | Configuração, workers, health/readiness e ciclo de vida |
+| `cmd/api` | Grafo Fx e inicialização do processo |
 
-## Proposta de persistência
+Os detalhes de rotas e payloads estão em [docs/api-http-oidc.md](docs/api-http-oidc.md); o fluxo da inbox/outbox está em [docs/implementacao/sqs-outbox.md](docs/implementacao/sqs-outbox.md).
 
-PostgreSQL será a autoridade para saldo, idempotência e estado do processamento. Dinheiro será persistido em unidades mínimas: `amount_minor BIGINT` mais `currency CHAR(3)`. No domínio, `Money` continuará carregando valor e moeda; entradas e saídas externas usarão decimal textual com duas casas. Essa escolha evita `float` e torna comparações exatas. O domínio precisa detectar overflow antes de persistir.
+## Persistência e dinheiro
 
-Identificadores serão UUIDs gerados pela aplicação, exceto `player_id`, que identifica o usuário autenticado pelo identificador estável do Keycloak. Timestamps serão `TIMESTAMPTZ` em UTC. Um jogador pode ter várias carteiras, mas apenas uma por moeda; operações em moedas diferentes usam carteiras distintas.
+PostgreSQL é a autoridade para saldo, idempotência, inbox, ledger e outbox. O adapter usa `pgx` com SQL explícito. Valores são `int64` em unidades mínimas e são persistidos em `BIGINT`, junto de uma moeda ISO 4217 em maiúsculas. A API recebe strings decimais com duas casas; não usa ponto flutuante. O parsing e a aritmética detectam overflow.
 
-### Entidades e responsabilidades
+As tabelas são `wallets`, `wager_transactions`, `wallet_ledger_entries`, `inbox_messages` e `outbox_events`. `player_id` é o `sub` estável do Keycloak: não existe cadastro de jogador local. Uma carteira tem ID próprio; `(player_id, currency)` é único. Assim, uma pessoa pode ter carteiras BRL e USD separadas.
 
-| Tabela | Papel | Restrições centrais propostas |
-| --- | --- | --- |
-| `wallets` | Uma carteira de um jogador em uma moeda, com saldo, versão e timestamps | `UNIQUE (player_id, currency)`, saldo não negativo, versão inicial positiva |
-| `wager_transactions` | Operações internas e externas, idempotência, estado e resultado original | unicidade por provedor/chave e provedor/ID externo; tipo, origem e estado limitados a valores conhecidos |
-| `wallet_ledger_entries` | Auditoria append-only de cada alteração efetiva de saldo | `UNIQUE (wallet_id, transaction_id)`, valor positivo, snapshots coerentes e proteção contra `UPDATE`/`DELETE` |
-| `inbox_messages` | Deduplicação durável das entregas SQS | `UNIQUE (consumer_name, message_id)`, hash para detectar reentrega divergente |
-| `outbox_events` | Eventos a publicar após commit | UUID estável, payload imutável, estado/tentativas/próximo envio e índice de busca de pendências |
+Cada movimento executa numa transação SQL: bloqueia a carteira com `SELECT ... FOR UPDATE`, confere as regras, altera saldo/versão quando necessário, grava a operação e o ledger e insere os eventos de outbox. O adapter usa isolamento serializável, retry limitado de erros de serialização/deadlock e atualização condicionada pela versão como proteção adicional. As constraints do banco continuam responsáveis por unicidade, saldo não negativo e append-only do ledger. Carteiras diferentes não dependem de um lock global.
 
-### Campos a considerar
+Saldo inicial positivo cria `OPENING`, lançamento de crédito e os dois eventos financeiros no mesmo commit. Saldo inicial zero cria apenas a carteira. `LOSS` conclui a operação e gera `WagerTransactionProcessed`, sem alterar saldo, versão ou ledger.
 
-- `wallets`: `id` próprio da carteira, `player_id` do Keycloak, `currency`, `balance_minor`, `version`, `created_at`, `updated_at`. Cada linha representa a associação entre um jogador e o saldo que mantém naquela moeda. Transações referenciam `wallets.id`; esse identificador não é o `player_id`.
-- `wager_transactions`: `id`, `origin` (`INTERNAL`/`EXTERNAL`), `kind`, `status`, IDs de carteira/jogador/provedor, `external_transaction_id`, `idempotency_key`, `payload_hash`, `round_id`, `game_id`, valor/moeda, referências externa e interna, `failure_code`, resultado de saldo original, timestamps e dados de retomada.
-- `wallet_ledger_entries`: `id`, `wallet_id`, `transaction_id`, direção, valor/moeda, `balance_before_minor`, `balance_after_minor`, `created_at`.
-- `inbox_messages`: `consumer_name`, `message_id`, hash, `received_at`, `completed_at` e referência opcional à operação.
-- `outbox_events`: `event_id`, agregado, tipo/versão, correlação/causa, snapshot JSON, ocorrência, tentativas, `next_attempt_at`, lease/claim e `published_at`.
+## Idempotência, referências e reversões
 
-## Invariantes e transação financeira
+O hash SHA-256 é calculado de JSON canônico dos campos de negócio normalizados. Chave idempotente e metadados de transporte são excluídos, por isso HTTP e SQS calculam o mesmo hash. `(provider_id, idempotency_key)` e `(provider_id, external_transaction_id)` são únicos e persistidos sem expiração planejada. Replay devolve o saldo do processamento original; conteúdo diferente para a mesma chave resulta em conflito.
 
-Uma operação financeira e seus efeitos devem compartilhar uma única transação SQL: obter a carteira com coordenação por linha, validar saldo e regras, atualizar saldo e versão, gravar ledger, fechar estado da operação e inserir eventos na outbox. Quando a origem é SQS, conclusão da inbox entra nesse mesmo commit. A mensagem só é removida após o commit.
+Na entrada SQS, `(consumer_name, message_id)` e o hash do envelope ficam na inbox. Inbox, operação e efeitos financeiros compartilham o commit SQL. A mensagem só é removida depois do commit. A deduplicação financeira da operação também funciona quando o mesmo comando entra por HTTP e SQS, independentemente de os message IDs serem diferentes.
 
-Em outras palavras, ao aceitar uma aposta, o banco atualiza o saldo e registra a movimentação no ledger no mesmo commit. Se também houver um evento para publicar, o registro desse evento entra nesse commit pela outbox. Um worker publica o evento depois. A outbox não calcula nem aplica a aposta; ela evita perder a notificação após o saldo ter sido confirmado. Se o saldo for insuficiente, a operação é registrada como rejeitada e não há débito nem lançamento financeiro no ledger.
+`REFUND` e `ROLLBACK` exigem referência externa resolvida pelo provedor. Enquanto não existir, a operação fica em `PENDING_REFERENCE`; o worker persiste tentativas e o próximo instante de retry. O limite é dez tentativas, após as quais a operação vira `REJECTED` com `REFERENCE_NOT_FOUND`. Referência rejeitada ou falha também não pode ser revertida. A implementação permite no máximo uma reversão bem-sucedida por referência, considerando conjuntamente `REFUND` e `ROLLBACK`; uma reversão que exceda o saldo é rejeitada com `REVERSAL_INSUFFICIENT_FUNDS`. Essas decisões evitam devolver duas vezes o mesmo valor.
 
-O adapter PostgreSQL usa `pgx` com transações `SERIALIZABLE`, `SELECT ... FOR UPDATE` na linha da carteira e até três tentativas em falhas de serialização ou deadlock. Isso serializa alterações da mesma carteira e deixa carteiras independentes avançarem em paralelo. Restrições e o `UPDATE` condicionado pela versão continuam como defesa adicional. A criação de operações e a disputa de idempotência tratam violações de unicidade como caminho normal de replay ou conflito.
+Erros de negócio produzem `REJECTED`; erros transitórios de infraestrutura fazem rollback para que a entrega possa ser repetida. O estado `FAILED` e sua transição de domínio existem, mas o worker ainda não classifica falhas permanentes de infraestrutura: falhas de publicação da outbox seguem em retry com backoff persistente. A política definitiva de falha permanente é uma limitação conhecida.
 
-`LOSS` não altera saldo, versão nem ledger, mas conclui a operação e gera o evento de operação processada. `OPENING` cria carteira, operação interna e lançamento inicial atomicamente. O ledger não aceita edição ou exclusão por mecanismos do banco.
+## Inbox, outbox e SQS
 
-Uma operação de reversão sem referência disponível fica em `PENDING_REFERENCE`. O worker lê pendências vencidas diretamente do PostgreSQL e o caso de uso de retomada grava a próxima tentativa com backoff exponencial; no limite padrão de dez tentativas, encerra com `REFERENCE_NOT_FOUND`. A resolução da referência e a reversão bem-sucedida são serializadas no banco para impedir duas reversões incompatíveis. O schema reserva a referência para reversões pendentes ou processadas; rejeitadas permanecem no histórico sem impedir nova tentativa.
+O consumidor usa a fila FIFO `wager-transactions.fifo`, timeout de visibilidade de 60 segundos e DLQ após cinco recebimentos. Erros transitórios ajustam a visibilidade com backoff exponencial entre 1 e 60 segundos. O `walletId` é `MessageGroupId`; o identificador estável da mensagem é `MessageDeduplicationId`. A janela FIFO é otimização, não a garantia de idempotência.
 
-## Decisões já alinhadas
+O publisher reivindica eventos confirmados com lease e `FOR UPDATE SKIP LOCKED`. Envia fora da transação; marca como publicado depois. Se houver queda após o envio e antes da confirmação, republica o mesmo `eventId` (at-least-once). Retentativas usam backoff persistido. Os eventos têm tipo, versão, correlação, causa, instante UTC e dados tipados; `WalletBalanceChanged` registra antes/depois e versão da carteira.
 
-- `player_id` identifica o usuário do Keycloak; não haverá tabela de jogadores nesta primeira modelagem.
-- Um jogador pode ter uma carteira por moeda. A carteira tem seu próprio `wallet_id`, que será referenciado pelas operações.
-- O histórico de idempotência financeira deve ser persistente e sem expiração planejada, conforme a exigência do challenge.
+Credenciais e políticas AWS/LocalStack protegem acesso às filas. A identidade de um produtor SQS é a credencial/role AWS autorizada pelo broker, não o `provider_id` do OIDC. O consumidor valida o contrato e aplica as mesmas regras financeiras; em produção, permissões devem restringir quem publica na fila de entrada e quem lê/publica em cada fila.
 
-## Regras definidas nesta fase
+## Identidade e autorização
 
-1. **Provedor:** o identificador fica na transação e vem do claim assinado `provider_id` do token Keycloak. Um `providerId` enviado no corpo é conferido e nunca define a identidade.
-2. **Replay:** a transação persistida guarda estado, código de falha e saldo resultante; a mesma chave e o mesmo hash retornam esse resultado sem reaplicar o saldo.
-3. **Reversões:** uma referência aceita somente uma reversão processada entre `REFUND` e `ROLLBACK`. Uma nova tentativa é recusada com `REFERENCE_ALREADY_REVERSED`.
-4. **Falhas:** regra de negócio produz `REJECTED`; erros transitórios fazem rollback para permitir retry. `FAILED` fica reservado ao worker quando uma falha permanente for classificada.
-5. **Inbox:** a deduplicação financeira é permanente. A retenção operacional da inbox será definida junto do consumidor SQS, sem afetar o histórico financeiro.
-6. **SQS:** a inbox usa `(consumer_name, message_id)` e é confirmada junto dos efeitos financeiros. O `messageId` do envelope é a identidade estável da entrega; `data.idempotencyKey` continua sendo a chave financeira comum com HTTP.
-7. **Publicação:** cada mensagem de entrada só é removida depois do commit SQL. Falhas de processamento deixam a mensagem para reentrega e redrive após cinco recebimentos. O publisher usa leases no PostgreSQL; eventos do mesmo agregado são publicados em ordem e o `eventId` é mantido em retries.
+Keycloak é o provedor OAuth 2.0/OIDC. A aplicação valida descoberta, emissor, assinatura, audiência e expiração do token. Os papéis de realm autorizam as rotas; `provider_id` vem do claim assinado do client e define o escopo das transações. Um valor de provedor no corpo não substitui a identidade autenticada. Provedores não consultam operações alheias; endpoints de carteira exigem o papel interno.
 
-## Organização inicial do código
+## Uber Fx e shutdown
 
-```text
-cmd/api/                 entrada da API e composição Fx
-cmd/worker/              entrada dos workers e composição Fx
-internal/domain/         Money, Wallet, WagerTransaction, erros e regras puras
-internal/application/    casos de uso e portas
-internal/adapters/http/  handlers e contratos HTTP
-internal/adapters/postgres/ repositórios e transações SQL
-internal/adapters/sqs/   consumidor e publisher
-internal/platform/       configuração, logging e composição compartilhada
-migrations/              migrations PostgreSQL versionadas
-deploy/                  Docker Compose e configuração local de serviços
-```
+Fx constrói configuração, pool PostgreSQL, autenticação OIDC, SDK SQS, repositórios, casos de uso, handler e workers. Os workers e o servidor são registrados no `fx.Lifecycle`. No encerramento, o servidor para de aceitar novas conexões; os workers recebem cancelamento e o Fx espera sua saída dentro do prazo; o pool PostgreSQL é fechado depois dos componentes que o usam. `TestApplicationStartsAndStopsWorkers` exercita start/stop contra PostgreSQL, Keycloak e LocalStack quando as variáveis de integração estão disponíveis.
 
-Os diretórios estão criados. A composição de dependências fica no Uber Fx em `cmd/api`; regras ficam em `internal/application`; os adaptadores ligam HTTP e PostgreSQL. `go-oidc` valida emissor, assinatura, audiência e validade do access token. Papéis de realm controlam rotas e o claim `provider_id` vincula o client autenticado ao provedor.
+## Logs e métricas
 
-## Estado atual
+O processo configura `slog` com JSON. Os caminhos HTTP e SQS registram conclusão e falha com IDs de correlação/mensagem, transação quando conhecida, carteira e provedor, sem incluir credenciais ou payload financeiro. `/metrics` expõe contadores de resultado, duplicatas, conflitos, retries, redrive, publicação, latência e divergências de reconciliação. `/health/ready` consulta PostgreSQL e as filas SQS configuradas.
 
-As etapas previstas no `docs/TODO_TESTES.md` estão implementadas e verificadas. O roteiro de execução da demonstração está em `docs/demo.md`.
+## Limitações atuais
+
+- Os structs de domínio ainda expõem campos públicos. Métodos de transição preservam as invariantes quando usados, mas o compilador não impede escrita direta em `Money`, `Wallet`, `WagerTransaction` ou `WalletLedgerEntry`; portanto, o encapsulamento e a imutabilidade pedidos na seção 6 do README não estão completos.
+- Falhas permanentes de infraestrutura ainda não são classificadas para gravar `FAILED`; o caminho automático atual retenta e usa DLQ para mensagens de entrada.
+- O repositório entrega código, migrations, Compose por dependência, testes e documentação. A gravação e entrega do vídeo de demonstração é uma etapa manual do autor, descrita em [docs/demo.md](docs/demo.md).
+
+O mapeamento requisito por requisito, incluindo evidências e trabalho restante, está em [docs/AUDITORIA_README.md](docs/AUDITORIA_README.md). O progresso de testes está em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).

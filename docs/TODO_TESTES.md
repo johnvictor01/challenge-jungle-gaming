@@ -83,6 +83,19 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Documentar como iniciar a stack, executar os fluxos principais e apresentar os testes de concorrência/recuperação em `docs/demo.md`.
 - [x] Executar `go test -race ./...`, integrações PostgreSQL/LocalStack e token expirado contra Keycloak real.
 
+## 8. Auditoria final do README
+
+- [x] Validar códigos de moeda ISO 4217 reais e cobrir código desconhecido.
+- [x] Testar início e encerramento do grafo Fx com PostgreSQL, Keycloak e LocalStack reais.
+- [x] Testar a mesma operação entrando por HTTP e depois por SQS, sem segundo débito.
+- [x] Completar logs correlacionados de HTTP, SQS e outbox, sem payload financeiro.
+- [x] Atualizar `ARCHITECTURE.md` para refletir o código atual e documentar limitações.
+- [x] Criar matriz de evidência em `docs/AUDITORIA_README.md`.
+- [ ] Encapsular os campos públicos de `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry`.
+- [ ] Definir e implementar classificação de falha permanente que transiciona operação para `FAILED`.
+- [ ] Configurar/verificar permissões IAM reais no ambiente de produção.
+- [ ] Gravar e entregar o vídeo de demonstração seguindo `docs/demo.md`.
+
 ## Conclusão
 
-As etapas e tarefas de implementação listadas neste roteiro estão concluídas. A gravação do vídeo e a apresentação do challenge ficam para execução manual seguindo `docs/demo.md`.
+As etapas funcionais principais estão implementadas. A auditoria final identificou os itens ainda abertos na seção 8; a gravação do vídeo e a configuração IAM de produção também dependem do ambiente/autor.
