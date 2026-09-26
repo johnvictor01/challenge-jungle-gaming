@@ -17,7 +17,7 @@ CREATE TABLE wager_transactions (
     status TEXT NOT NULL CHECK (status IN ('PENDING', 'PENDING_REFERENCE', 'PROCESSED', 'REJECTED', 'FAILED')),
     failure_code TEXT,
     result_balance_minor BIGINT CHECK (result_balance_minor IS NULL OR result_balance_minor >= 0),
-    result_currency CHAR(3) CHECK (result_currency IS NULL OR result_currency ~ '^[A-Z]{3}$'),
+    result_currency CHAR(3),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     next_attempt_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

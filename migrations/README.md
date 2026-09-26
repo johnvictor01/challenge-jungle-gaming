@@ -13,13 +13,13 @@ docker compose -f deploy/postgres.compose.yaml up -d postgres
 Aplique todas as migrations:
 
 ```sh
-docker compose -f deploy/postgres.compose.yaml run --rm migrate up
+docker compose -f deploy/postgres.compose.yaml --profile tools run --rm migrate
 ```
 
 Reverta a migration mais recente:
 
 ```sh
-docker compose -f deploy/postgres.compose.yaml run --rm migrate down 1
+docker compose -f deploy/postgres.compose.yaml --profile tools run --rm migrate down 1
 ```
 
 O Compose usa usuário, senha, banco e porta locais de exemplo. Sobrescreva `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` e `POSTGRES_PORT` no ambiente para escolher outros valores. A senha padrão é apenas para desenvolvimento local.
