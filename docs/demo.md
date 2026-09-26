@@ -109,10 +109,3 @@ go test ./internal/platform -run TestDependenciesReadinessAgainstPostgresAndLoca
 
 Nos testes PostgreSQL, destaque os 50 replays distribuídos em três processos, a disputa por saldo insuficiente, a concorrência de `REFUND`/`ROLLBACK`, retomada de referência após reinício e conferência do saldo pelo ledger. Os testes do adapter SQS cobrem redelivery, backoff, DLQ e interrupções da outbox.
 
-## Sugestão de ordem para a demonstração
-
-1. Mostrar a arquitetura e apontar tabelas, migrations e limites entre domínio, aplicação e adapters.
-2. Demonstrar Keycloak emitindo os tokens de serviço e o provider.
-3. Abrir carteira, processar aposta, repetir a aposta e conferir ledger/reconciliação.
-4. Mostrar `/health/ready` e `/metrics`.
-5. Rodar testes de concorrência e recuperação, explicando o saldo final e a garantia de idempotência.
