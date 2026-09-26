@@ -7,7 +7,7 @@ Este roteiro descreve como iniciar o serviço e reproduzir seus principais fluxo
 Para executar os fluxos manualmente sem copiar vários comandos `curl`, rode na raiz:
 
 ```sh
-python3 scripts/dev_menu.py
+python3 "Facilitadores de uso/dev_menu.py"
 ```
 
 O menu lê `.env` (ou usa os valores de `.env.example` se o arquivo ainda não existir). A opção 1 inicia PostgreSQL, aplica migrations, inicia Keycloak/LocalStack e sobe a API. As demais opções abrem carteira, enviam uma operação, repetem o último comando para conferir idempotência, consultam carteira/ledger, reconciliam e rodam os testes. Os logs da API iniciada pelo menu ficam em `.local/dev-menu-api.log`.

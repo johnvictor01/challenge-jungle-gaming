@@ -1,0 +1,497 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-09-26T14:25:01.971Z",
+  "__export_source": "insomnia.desktop.app:v13.3.0",
+  "resources": [
+    {
+      "_id": "wrk_acbf36c0bd6d",
+      "parentId": null,
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "Challenge Jungle Gaming API",
+      "description": "Requests para os endpoints HTTP documentados no README. Suba a stack local antes de enviar.",
+      "scope": "collection",
+      "_type": "workspace"
+    },
+    {
+      "_id": "env_ce6823af2604",
+      "parentId": "wrk_acbf36c0bd6d",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "oidc_token_url": "http://localhost:8180/realms/backend-challenge/protocol/openid-connect/token",
+        "internal_client_id": "internal-service",
+        "internal_client_secret": "internal-service-local-secret",
+        "provider_client_id": "provider-a",
+        "provider_client_secret": "provider-a-local-secret",
+        "internal_token": "COLE_AQUI_O_ACCESS_TOKEN_INTERNAL",
+        "provider_token": "COLE_AQUI_O_ACCESS_TOKEN_PROVIDER",
+        "player_id": "demo-player-insomnia",
+        "wallet_id": "COLE_AQUI_O_ID_DA_CARTEIRA",
+        "transaction_id": "COLE_AQUI_O_TRANSACTION_ID",
+        "external_transaction_id": "insomnia-bet-001",
+        "idempotency_key": "provider-a:insomnia-bet-001",
+        "round_id": "insomnia-round-001",
+        "game_id": "fortune-chimp"
+      },
+      "dataPropertyOrder": {
+        "&": [
+          "base_url",
+          "oidc_token_url",
+          "internal_client_id",
+          "internal_client_secret",
+          "provider_client_id",
+          "provider_client_secret",
+          "internal_token",
+          "provider_token",
+          "player_id",
+          "wallet_id",
+          "transaction_id",
+          "external_transaction_id",
+          "idempotency_key",
+          "round_id",
+          "game_id"
+        ]
+      },
+      "color": null,
+      "isPrivate": false,
+      "metaSortKey": 1,
+      "_type": "environment"
+    },
+    {
+      "_id": "fld_29d1d54a2b52",
+      "parentId": "wrk_acbf36c0bd6d",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "00 - Health e métricas",
+      "description": "",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1790432701.97208,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_4c318b4a5250",
+      "parentId": "fld_29d1d54a2b52",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/health/live",
+      "name": "Liveness",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1790432701.972099,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_199716a6da28",
+      "parentId": "fld_29d1d54a2b52",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/health/ready",
+      "name": "Readiness (PostgreSQL e SQS)",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1790432701.972114,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_3bb1db9c826e",
+      "parentId": "fld_29d1d54a2b52",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/metrics",
+      "name": "Métricas Prometheus",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": -1790432701.972127,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_64996ac12335",
+      "parentId": "wrk_acbf36c0bd6d",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "01 - Keycloak - obter tokens",
+      "description": "",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1790432701.972137,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_0a7e2a700ed5",
+      "parentId": "fld_64996ac12335",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.oidc_token_url }}",
+      "name": "Token interno (carteiras)",
+      "description": "Envie e copie o campo access_token da resposta para a variável de ambiente correspondente (internal_token ou provider_token).",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/x-www-form-urlencoded",
+        "params": [
+          {
+            "name": "grant_type",
+            "value": "client_credentials"
+          },
+          {
+            "name": "client_id",
+            "value": "{{ _.internal_client_id }}"
+          },
+          {
+            "name": "client_secret",
+            "value": "{{ _.internal_client_secret }}"
+          }
+        ]
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/x-www-form-urlencoded"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.97215,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_cfc9e09f1ddd",
+      "parentId": "fld_64996ac12335",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.oidc_token_url }}",
+      "name": "Token provider-a (apostas)",
+      "description": "Envie e copie o campo access_token da resposta para a variável de ambiente correspondente (internal_token ou provider_token).",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/x-www-form-urlencoded",
+        "params": [
+          {
+            "name": "grant_type",
+            "value": "client_credentials"
+          },
+          {
+            "name": "client_id",
+            "value": "{{ _.provider_client_id }}"
+          },
+          {
+            "name": "client_secret",
+            "value": "{{ _.provider_client_secret }}"
+          }
+        ]
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/x-www-form-urlencoded"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972163,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_439802770a5a",
+      "parentId": "wrk_acbf36c0bd6d",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "02 - Carteiras (token interno)",
+      "description": "",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1790432701.972172,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_5b9cd41f81ea",
+      "parentId": "fld_439802770a5a",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wallets",
+      "name": "Criar carteira",
+      "description": "Após enviar, copie o id da resposta para wallet_id.",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"playerId\": \"{{ _.player_id }}\",\n  \"initialBalance\": {\n    \"amount\": \"1000.00\",\n    \"currency\": \"BRL\"\n  }\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.internal_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972223,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_3b59b0ec0b89",
+      "parentId": "fld_439802770a5a",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wallets/{{ _.wallet_id }}",
+      "name": "Consultar carteira",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.internal_token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972238,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_01c7a20693a8",
+      "parentId": "fld_439802770a5a",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wallets/{{ _.wallet_id }}/ledger?limit=50",
+      "name": "Consultar ledger da carteira",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.internal_token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972253,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_129bcccf47a3",
+      "parentId": "fld_439802770a5a",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wallets/{{ _.wallet_id }}/reconciliation",
+      "name": "Reconciliar carteira",
+      "description": "",
+      "method": "POST",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.internal_token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972263,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "fld_ab12ac0b0aeb",
+      "parentId": "wrk_acbf36c0bd6d",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "name": "03 - Operações do provedor (token provider-a)",
+      "description": "",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1790432701.972272,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_5cf9ea0c34e4",
+      "parentId": "fld_ab12ac0b0aeb",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wagering/transactions",
+      "name": "Enviar aposta BET",
+      "description": "Use uma nova external_transaction_id e idempotency_key para cada nova operação. Repetir sem mudar esses valores demonstra replay idempotente.",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"externalTransactionId\": \"{{ _.external_transaction_id }}\",\n  \"playerId\": \"{{ _.player_id }}\",\n  \"walletId\": \"{{ _.wallet_id }}\",\n  \"roundId\": \"{{ _.round_id }}\",\n  \"gameId\": \"{{ _.game_id }}\",\n  \"kind\": \"BET\",\n  \"money\": {\n    \"amount\": \"25.00\",\n    \"currency\": \"BRL\"\n  }\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.provider_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Idempotency-Key",
+          "value": "{{ _.idempotency_key }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972313,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_718b06d0ba8f",
+      "parentId": "fld_ab12ac0b0aeb",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wagering/transactions",
+      "name": "Repetir aposta (idempotência)",
+      "description": "Repete o mesmo pedido; espera idempotentReplay=true e sem novo débito.",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"externalTransactionId\": \"{{ _.external_transaction_id }}\",\n  \"playerId\": \"{{ _.player_id }}\",\n  \"walletId\": \"{{ _.wallet_id }}\",\n  \"roundId\": \"{{ _.round_id }}\",\n  \"gameId\": \"{{ _.game_id }}\",\n  \"kind\": \"BET\",\n  \"money\": {\n    \"amount\": \"25.00\",\n    \"currency\": \"BRL\"\n  }\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.provider_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Idempotency-Key",
+          "value": "{{ _.idempotency_key }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972342,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_5b031a36f8e6",
+      "parentId": "fld_ab12ac0b0aeb",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/wagering/transactions/{{ _.transaction_id }}",
+      "name": "Consultar transação pelo ID interno",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.provider_token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972353,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    },
+    {
+      "_id": "req_b913001ef972",
+      "parentId": "fld_ab12ac0b0aeb",
+      "modified": "2026-09-26T14:25:01.971Z",
+      "created": "2026-09-26T14:25:01.971Z",
+      "url": "{{ _.base_url }}/providers/{{ _.provider_client_id }}/wagering/transactions/{{ _.external_transaction_id }}",
+      "name": "Consultar transação por ID externo do provedor",
+      "description": "",
+      "method": "GET",
+      "body": {},
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.provider_token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1790432701.972364,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "_type": "request"
+    }
+  ]
+}
