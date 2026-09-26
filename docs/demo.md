@@ -2,6 +2,18 @@
 
 Este roteiro permite apresentar o serviço e gravar a demonstração do challenge. Use somente as credenciais locais do `.env.example`.
 
+## Menu interativo de desenvolvimento
+
+Para executar os fluxos manualmente sem copiar vários comandos `curl`, rode na raiz:
+
+```sh
+python3 scripts/dev_menu.py
+```
+
+O menu lê `.env` (ou usa os valores de `.env.example` se o arquivo ainda não existir). A opção 1 inicia PostgreSQL, aplica migrations, inicia Keycloak/LocalStack e sobe a API. As demais opções abrem carteira, enviam uma operação, repetem o último comando para conferir idempotência, consultam carteira/ledger, reconciliam e rodam os testes. Os logs da API iniciada pelo menu ficam em `.local/dev-menu-api.log`.
+
+Não existe operação de fechar/apagar carteira na API. O ledger é histórico financeiro e a carteira deve continuar consultável; no menu, a opção 11 encerra a API e para os containers, preservando os volumes e os dados.
+
 ## 1. Preparar os serviços
 
 Na raiz do repositório:

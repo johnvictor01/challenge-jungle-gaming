@@ -5,6 +5,7 @@
 /bin/
 /coverage.out
 /coverage.html
+/.local/
 
 *.test
 *.prof
