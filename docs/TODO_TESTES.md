@@ -68,16 +68,16 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 
 ## 6. Concorrência e recuperação
 
-- [ ] Enviar a mesma aposta 50 vezes em paralelo e confirmar um único débito.
-- [ ] Disputar saldo de `100.00` com duas apostas de `80.00` e confirmar que apenas uma é debitada.
+- [x] Enviar a mesma aposta 50 vezes em paralelo, distribuídas por três processos PostgreSQL independentes, e confirmar um único débito, transação e par de eventos.
+- [x] Disputar saldo de `100.00` com duas apostas de `80.00` em três processos independentes e confirmar que apenas uma é debitada.
 - [ ] Confirmar paralelismo em carteiras diferentes.
-- [ ] Repetir os cenários com pelo menos três instâncias independentes.
+- [x] Repetir os cenários de idempotência e disputa de saldo com três processos independentes, cada um com seu próprio pool PostgreSQL.
 - [ ] Validar referência que chega depois da operação que depende dela.
 - [ ] Conferir saldo contra créditos menos débitos do ledger.
 - [ ] Executar `go test -race ./...` e os testes de integração com dependências reais.
 
 ## Próxima sequência de trabalho
 
-1. Na etapa 6, cobrir a disputa de idempotência com 50 envios paralelos e concorrência com três instâncias.
+1. Na etapa 6, validar carteiras diferentes em paralelo, retomada de referências pendentes após reinício e reconciliação do ledger sob concorrência.
 2. Adicionar métricas e readiness que também consulte SQS.
 3. Completar a documentação de execução e preparar a demonstração.

@@ -1,9 +1,13 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -154,35 +158,12 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open wallet: %v", err)
 	}
-	service := application.NewProcessWagerService(store, ids)
-	commands := []application.ProcessWagerCommand{
-		{WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "concurrent-provider-" + operationID, ExternalTransactionID: "concurrent-bet-a-" + operationID, IdempotencyKey: "concurrent-key-a-" + operationID, RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: 8_000, Currency: "BRL"}},
-		{WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "concurrent-provider-" + operationID, ExternalTransactionID: "concurrent-bet-b-" + operationID, IdempotencyKey: "concurrent-key-b-" + operationID, RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: 8_000, Currency: "BRL"}},
-	}
-	results := make(chan application.ProcessWagerResult, len(commands))
-	errors := make(chan error, len(commands))
-	var group sync.WaitGroup
-	for _, command := range commands {
-		group.Add(1)
-		go func(command application.ProcessWagerCommand) {
-			defer group.Done()
-			result, err := service.Execute(context.Background(), command)
-			if err != nil {
-				errors <- err
-				return
-			}
-			results <- result
-		}(command)
-	}
-	group.Wait()
-	close(results)
-	close(errors)
-	for err := range errors {
-		t.Errorf("concurrent Execute() error = %v", err)
-	}
+	commandA := integrationBetCommand(opened.Wallet, operationID, "a", 8_000)
+	commandB := integrationBetCommand(opened.Wallet, operationID, "b", 8_000)
+	results := runPostgresWorkerProcesses(t, os.Getenv("TEST_DATABASE_URL"), [][]application.ProcessWagerCommand{{commandA}, {commandB}, {commandA}})
 	var processed, rejected int
-	for result := range results {
-		switch result.Status {
+	for _, result := range results {
+		switch domain.TransactionStatus(result.Status) {
 		case domain.TransactionProcessed:
 			processed++
 		case domain.TransactionRejected:
@@ -194,8 +175,8 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 			t.Errorf("unexpected status %s", result.Status)
 		}
 	}
-	if processed != 1 || rejected != 1 {
-		t.Fatalf("processed/rejected = %d/%d, want 1/1", processed, rejected)
+	if processed+rejected != 3 || rejected != 1 {
+		t.Fatalf("results processed/rejected = %d/%d, want three results containing exactly one rejection", processed, rejected)
 	}
 	var balance int64
 	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID).Scan(&balance); err != nil {
@@ -204,6 +185,176 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 	if balance != 2_000 {
 		t.Errorf("balance = %d, want 2000", balance)
 	}
+}
+
+func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
+		PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := integrationBetCommand(opened.Wallet, integrationPlayerID(t), "same", 2_500)
+	groups := make([][]application.ProcessWagerCommand, 3)
+	for request := 0; request < 50; request++ {
+		groups[request%len(groups)] = append(groups[request%len(groups)], command)
+	}
+	results := runPostgresWorkerProcesses(t, os.Getenv("TEST_DATABASE_URL"), groups)
+	if len(results) != 50 {
+		t.Fatalf("got %d results, want 50", len(results))
+	}
+	transactionIDs := map[string]bool{}
+	for _, result := range results {
+		if result.Error != "" {
+			t.Errorf("worker request failed: %s", result.Error)
+			continue
+		}
+		if domain.TransactionStatus(result.Status) != domain.TransactionProcessed {
+			t.Errorf("status=%s, want PROCESSED", result.Status)
+		}
+		transactionIDs[result.TransactionID] = true
+	}
+	if len(transactionIDs) != 1 {
+		t.Fatalf("distinct transaction IDs=%d, want exactly one", len(transactionIDs))
+	}
+	var balance int64
+	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id=$1", opened.Wallet.ID).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if balance != 7_500 {
+		t.Fatalf("balance=%d, want 7500", balance)
+	}
+	var transactionCount, ledgerCount, eventCount int
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wager_transactions WHERE provider_id=$1 AND idempotency_key=$2", command.ProviderID, command.IdempotencyKey).Scan(&transactionCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wallet_ledger_entries WHERE wallet_id=$1", opened.Wallet.ID).Scan(&ledgerCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM outbox_events WHERE causation_id=$1", results[0].TransactionID).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if transactionCount != 1 || ledgerCount != 2 || eventCount != 2 {
+		t.Fatalf("transaction/ledger/wager-outbox counts=%d/%d/%d, want 1/2/2", transactionCount, ledgerCount, eventCount)
+	}
+	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID)
+	if err != nil || !reconciliation.Consistent {
+		t.Fatalf("reconciliation=%+v error=%v", reconciliation, err)
+	}
+}
+
+func integrationBetCommand(wallet *domain.Wallet, operationID, suffix string, amount int64) application.ProcessWagerCommand {
+	return application.ProcessWagerCommand{
+		WalletID: wallet.ID, PlayerID: wallet.PlayerID, ProviderID: "concurrent-provider-" + operationID,
+		ExternalTransactionID: "concurrent-bet-" + suffix + "-" + operationID, IdempotencyKey: "concurrent-key-" + suffix + "-" + operationID,
+		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionBet, Amount: domain.Money{Units: amount, Currency: "BRL"},
+	}
+}
+
+type postgresWorkerPayload struct {
+	DatabaseURL string
+	Commands    []application.ProcessWagerCommand
+}
+
+type postgresWorkerOutcome struct {
+	Status           string
+	TransactionID    string
+	FailureCode      string
+	Balance          *domain.Money
+	IdempotentReplay bool
+	Error            string
+}
+
+func TestPostgresWorkerProcess(t *testing.T) {
+	encoded := os.Getenv("TEST_POSTGRES_WORKER_PAYLOAD")
+	if encoded == "" {
+		return
+	}
+	var payload postgresWorkerPayload
+	if err := json.Unmarshal([]byte(encoded), &payload); err != nil {
+		t.Fatalf("decode worker payload: %v", err)
+	}
+	store, err := NewPool(context.Background(), payload.DatabaseURL)
+	if err != nil {
+		t.Fatalf("open independent worker pool: %v", err)
+	}
+	defer store.Close()
+	service := application.NewProcessWagerService(store, application.UUIDGenerator{})
+	start := make(chan struct{})
+	outcomes := make([]postgresWorkerOutcome, len(payload.Commands))
+	var group sync.WaitGroup
+	for index, command := range payload.Commands {
+		group.Add(1)
+		go func(index int, command application.ProcessWagerCommand) {
+			defer group.Done()
+			<-start
+			result, err := service.Execute(context.Background(), command)
+			if err != nil {
+				outcomes[index].Error = err.Error()
+				return
+			}
+			outcomes[index] = postgresWorkerOutcome{Status: string(result.Status), TransactionID: result.TransactionID, FailureCode: result.FailureCode, Balance: result.Balance, IdempotentReplay: result.IdempotentReplay}
+		}(index, command)
+	}
+	close(start)
+	group.Wait()
+	resultJSON, err := json.Marshal(outcomes)
+	if err != nil {
+		t.Fatalf("encode worker results: %v", err)
+	}
+	fmt.Printf("POSTGRES_WORKER_RESULT:%s\n", resultJSON)
+}
+
+func runPostgresWorkerProcesses(t *testing.T, databaseURL string, groups [][]application.ProcessWagerCommand) []postgresWorkerOutcome {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type worker struct {
+		command *exec.Cmd
+		output  bytes.Buffer
+	}
+	workers := make([]*worker, 0, len(groups))
+	for _, commands := range groups {
+		payload, err := json.Marshal(postgresWorkerPayload{DatabaseURL: databaseURL, Commands: commands})
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := &worker{command: exec.Command(executable, "-test.run=^TestPostgresWorkerProcess$")}
+		child.command.Env = append(os.Environ(), "TEST_POSTGRES_WORKER_PAYLOAD="+string(payload))
+		child.command.Stdout, child.command.Stderr = &child.output, &child.output
+		if err := child.command.Start(); err != nil {
+			t.Fatalf("start independent worker: %v", err)
+		}
+		workers = append(workers, child)
+	}
+	results := make([]postgresWorkerOutcome, 0)
+	for _, child := range workers {
+		if err := child.command.Wait(); err != nil {
+			t.Fatalf("worker process failed: %v\n%s", err, child.output.String())
+		}
+		const marker = "POSTGRES_WORKER_RESULT:"
+		output := child.output.String()
+		position := strings.LastIndex(output, marker)
+		if position < 0 {
+			t.Fatalf("worker did not return results:\n%s", output)
+		}
+		lineEnd := strings.IndexByte(output[position:], '\n')
+		if lineEnd >= 0 {
+			output = output[position+len(marker) : position+lineEnd]
+		} else {
+			output = output[position+len(marker):]
+		}
+		var outcomes []postgresWorkerOutcome
+		if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &outcomes); err != nil {
+			t.Fatalf("decode worker results: %v\n%s", err, child.output.String())
+		}
+		results = append(results, outcomes...)
+	}
+	return results
 }
 
 func TestPostgresOutboxClaimsAreExclusiveAndPreserveAggregateOrder(t *testing.T) {
