@@ -54,6 +54,7 @@ func TestWalletCreationRejectsInvalidData(t *testing.T) {
 		wantErr  error
 	}{
 		{"jogador vazio", "", "BRL", 0, ErrInvalidPlayerID},
+		{"jogador só com espaços", "   ", "BRL", 0, ErrInvalidPlayerID},
 		{"moeda vazia", "jogador1", "", 0, ErrInvalidCurrency},
 		{"moeda minúscula", "jogador1", "brl", 0, ErrInvalidCurrency},
 		{"moeda com tamanho inválido", "jogador1", "BR", 0, ErrInvalidCurrency},
@@ -103,6 +104,7 @@ func TestRehydrateWalletRejectsInvalidData(t *testing.T) {
 	}{
 		{"ID vazio", "", "jogador1", Money{Units: 1, Currency: "BRL"}, 1, now, now, ErrInvalidWalletID},
 		{"jogador vazio", "wallet-1", "", Money{Units: 1, Currency: "BRL"}, 1, now, now, ErrInvalidPlayerID},
+		{"jogador só com espaços", "wallet-1", "  ", Money{Units: 1, Currency: "BRL"}, 1, now, now, ErrInvalidPlayerID},
 		{"moeda inválida", "wallet-1", "jogador1", Money{Units: 1, Currency: "brl"}, 1, now, now, ErrInvalidCurrency},
 		{"saldo negativo", "wallet-1", "jogador1", Money{Units: -1, Currency: "BRL"}, 1, now, now, ErrNegativeBalance},
 		{"versão inválida", "wallet-1", "jogador1", Money{Units: 1, Currency: "BRL"}, 0, now, now, ErrInvalidVersion},
