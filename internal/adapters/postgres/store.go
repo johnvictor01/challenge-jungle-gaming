@@ -41,6 +41,35 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
+// DuePendingReferenceIDs lists persisted operations ready for the reference worker.
+func (s *Store) DuePendingReferenceIDs(ctx context.Context, limit int) ([]string, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("postgres store is not configured")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id FROM wager_transactions
+		WHERE status = 'PENDING_REFERENCE' AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+		ORDER BY COALESCE(next_attempt_at, created_at), created_at, id LIMIT $1`, limit)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, mapError(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError(err)
+	}
+	return ids, nil
+}
+
 // WithinTransaction usa isolamento serializável. O lock da carteira em
 // FindByID ordena escritores da mesma carteira; o isolamento também protege
 // decisões que leem referências e idempotência na mesma operação.

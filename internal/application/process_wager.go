@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/observability"
 )
 
 // ProcessWagerCommand contém os dados já normalizados pela entrada HTTP ou SQS.
@@ -48,7 +49,22 @@ func NewProcessWagerService(uow UnitOfWork, ids IDGenerator) *ProcessWagerServic
 }
 
 // Execute aplica uma operação e grava seus efeitos dentro de uma única UnitOfWork.
-func (s *ProcessWagerService) Execute(ctx context.Context, command ProcessWagerCommand) (ProcessWagerResult, error) {
+func (s *ProcessWagerService) Execute(ctx context.Context, command ProcessWagerCommand) (result ProcessWagerResult, err error) {
+	started := time.Now()
+	defer func() {
+		observability.Default.Observe("wager_processing_latency", time.Since(started))
+		if err != nil {
+			observability.Default.Inc("wager_result_error")
+			if errors.Is(err, ErrIdempotencyConflict) || errors.Is(err, ErrExternalTransactionConflict) || errors.Is(err, ErrPersistenceConflict) {
+				observability.Default.Inc("wager_conflict")
+			}
+			return
+		}
+		observability.Default.Inc("wager_result_" + strings.ToLower(string(result.Status)))
+		if result.IdempotentReplay {
+			observability.Default.Inc("wager_duplicate")
+		}
+	}()
 	if s == nil || s.uow == nil || s.ids == nil {
 		return ProcessWagerResult{}, errors.New("process wager service is not configured")
 	}
@@ -60,7 +76,6 @@ func (s *ProcessWagerService) Execute(ctx context.Context, command ProcessWagerC
 		return ProcessWagerResult{}, ErrPayloadHashMismatch
 	}
 	command.PayloadHash = hash
-	var result ProcessWagerResult
 	err = s.uow.WithinTransaction(ctx, func(repositories Repositories) error {
 		var err error
 		result, err = s.executeInTransaction(ctx, repositories, command)
@@ -78,32 +93,59 @@ func (s *ProcessWagerService) Execute(ctx context.Context, command ProcessWagerC
 }
 
 func (s *ProcessWagerService) resolvePersistenceConflict(ctx context.Context, command ProcessWagerCommand) (ProcessWagerResult, error) {
-	var result ProcessWagerResult
-	err := s.uow.WithinTransaction(ctx, func(repositories Repositories) error {
-		found, err := repositories.Transactions.FindByIdempotencyKey(ctx, command.ProviderID, command.IdempotencyKey)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		if found != nil {
-			if found.PayloadHash != command.PayloadHash {
-				return ErrIdempotencyConflict
+	for attempt := 0; attempt < 3; attempt++ {
+		var result ProcessWagerResult
+		err := s.uow.WithinTransaction(ctx, func(repositories Repositories) error {
+			found, err := repositories.Transactions.FindByIdempotencyKey(ctx, command.ProviderID, command.IdempotencyKey)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
 			}
-			result = resultFromTransaction(found, true)
-			return nil
+			if found != nil {
+				if found.PayloadHash != command.PayloadHash {
+					return ErrIdempotencyConflict
+				}
+				result = resultFromTransaction(found, true)
+				return nil
+			}
+			found, err = repositories.Transactions.FindByExternalID(ctx, command.ProviderID, command.ExternalTransactionID)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			if found != nil {
+				return ErrExternalTransactionConflict
+			}
+			if command.Kind == domain.TransactionRefund || command.Kind == domain.TransactionRollback {
+				reference, err := repositories.Transactions.FindByExternalID(ctx, command.ProviderID, command.ReferenceExternalTransactionID)
+				if err != nil && !errors.Is(err, ErrNotFound) {
+					return err
+				}
+				if reference != nil {
+					reversal, err := repositories.Transactions.FindSuccessfulReversal(ctx, reference.ID)
+					if err != nil && !errors.Is(err, ErrNotFound) {
+						return err
+					}
+					if reversal != nil {
+						// A competing refund/rollback won the unique reference constraint
+						// after our initial check. Re-run the use case in this fresh
+						// transaction so it records a stable business rejection.
+						result, err = s.executeInTransaction(ctx, repositories, command)
+						return err
+					}
+				}
+			}
+			return ErrPersistenceConflict
+		})
+		if errors.Is(err, ErrPersistenceConflict) && attempt < 2 && (command.Kind == domain.TransactionRefund || command.Kind == domain.TransactionRollback) {
+			// The serializable snapshot may predate the winner's commit even though
+			// the unique index observed it. Retry with a fresh database snapshot.
+			continue
 		}
-		found, err = repositories.Transactions.FindByExternalID(ctx, command.ProviderID, command.ExternalTransactionID)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
+		if err != nil {
+			return ProcessWagerResult{}, err
 		}
-		if found != nil {
-			return ErrExternalTransactionConflict
-		}
-		return ErrPersistenceConflict
-	})
-	if err != nil {
-		return ProcessWagerResult{}, err
+		return result, nil
 	}
-	return result, nil
+	return ProcessWagerResult{}, ErrPersistenceConflict
 }
 
 func (s *ProcessWagerService) executeInTransaction(ctx context.Context, repositories Repositories, command ProcessWagerCommand) (ProcessWagerResult, error) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/application"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/observability"
 )
 
 type WalletOpener interface {
@@ -49,6 +50,7 @@ func NewHandler(openWallet WalletOpener, process WagerProcessor, queries DataQue
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", h.live)
 	mux.HandleFunc("GET /health/ready", h.ready)
+	mux.Handle("GET /metrics", observability.Default)
 	mux.Handle("POST /wallets", h.secure("wallet:write", http.HandlerFunc(h.createWallet)))
 	mux.Handle("GET /wallets/{walletID}", h.secure("wallet:read", http.HandlerFunc(h.getWallet)))
 	mux.Handle("GET /wallets/{walletID}/ledger", h.secure("wallet:read", http.HandlerFunc(h.listLedger)))

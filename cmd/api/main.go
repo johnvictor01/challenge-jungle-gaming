@@ -33,6 +33,13 @@ func options(logger *slog.Logger) []fx.Option {
 		fx.Provide(newPostgresStore),
 		fx.Provide(func(store *postgres.Store) application.UnitOfWork { return store }),
 		fx.Provide(application.NewOpenWalletService, application.NewProcessWagerService, application.NewQueryService),
+		fx.Provide(func(store *postgres.Store, ids application.IDGenerator) *application.ResolvePendingReferenceService {
+			return application.NewResolvePendingReferenceService(store, ids, application.ReferenceRetryPolicy{})
+		}),
+		fx.Provide(func(store *postgres.Store) platform.PendingReferenceScanner { return store }),
+		fx.Provide(func(resolver *application.ResolvePendingReferenceService) platform.PendingReferenceResolver {
+			return resolver
+		}),
 		fx.Provide(func(service *application.OpenWalletService) httpadapter.WalletOpener { return service }),
 		fx.Provide(func(service *application.ProcessWagerService) httpadapter.WagerProcessor { return service }),
 		fx.Provide(func(service *application.QueryService) httpadapter.DataQueries { return service }),
@@ -53,14 +60,46 @@ func options(logger *slog.Logger) []fx.Option {
 		}),
 		fx.Provide(func(consumer *sqsadapter.Consumer) platform.SQSConsumer { return consumer }),
 		fx.Provide(platform.NewOutboxWorker),
+		fx.Provide(platform.NewPendingReferenceWorker),
 		fx.Provide(platform.NewSQSConsumerWorker),
 		fx.Provide(func(auth *httpadapter.OIDCAuthenticator) httpadapter.TokenAuthenticator { return auth }),
-		fx.Provide(func(store *postgres.Store) httpadapter.ReadinessChecker { return store }),
+		fx.Provide(func(store *postgres.Store, client *sqs.Client, config platform.Config) httpadapter.ReadinessChecker {
+			return platform.DependenciesReadiness{Database: store, SQS: client, QueueURLs: []string{config.SQSInputQueueURL, config.SQSQueueURL}}
+		}),
 		fx.Provide(httpadapter.NewHandler),
 		fx.Invoke(registerHTTPServer),
 		fx.Invoke(registerOutboxWorker),
+		fx.Invoke(registerPendingReferenceWorker),
 		fx.Invoke(registerSQSConsumerWorker),
 	}
+}
+
+func registerPendingReferenceWorker(lifecycle fx.Lifecycle, worker *platform.PendingReferenceWorker, logger *slog.Logger) {
+	var cancel context.CancelFunc
+	var done chan struct{}
+	lifecycle.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			ctx, stop := context.WithCancel(context.Background())
+			cancel, done = stop, make(chan struct{})
+			go func() { defer close(done); worker.Run(ctx) }()
+			logger.Info("pending reference worker started")
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if cancel != nil {
+				cancel()
+			}
+			if done == nil {
+				return nil
+			}
+			select {
+			case <-done:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	})
 }
 
 func registerSQSConsumerWorker(lifecycle fx.Lifecycle, worker *platform.SQSConsumerWorker, logger *slog.Logger) {

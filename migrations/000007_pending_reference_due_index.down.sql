@@ -1,0 +1,1 @@
+DROP INDEX wager_transactions_pending_reference_due_idx;
