@@ -1,0 +1,32 @@
+name: backend-challenge-sqs
+
+services:
+  localstack:
+    image: localstack/localstack:4.3.0
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      PERSISTENCE: "1"
+    ports:
+      - "${LOCALSTACK_PORT:-4566}:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+  create-queues:
+    image: amazon/aws-cli:2.25.8
+    depends_on:
+      - localstack
+    environment:
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until aws --endpoint-url=http://localstack:4566 sqs list-queues >/dev/null 2>&1; do sleep 2; done;
+        aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name ${SQS_QUEUE_NAME:-wager-events.fifo} --attributes FifoQueue=true,ContentBasedDeduplication=false --query QueueUrl --output text;
+
+volumes:
+  localstack_data:

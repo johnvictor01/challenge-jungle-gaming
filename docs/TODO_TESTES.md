@@ -1,6 +1,6 @@
 # Roteiro de implementação e testes
 
-Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP e validação OIDC estão implementados. Fluxo end-to-end com Keycloak e PostgreSQL reais foi verificado; SQS/inbox/outbox ainda estão pendentes.
+Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP, validação OIDC e publisher da outbox estão implementados. O consumidor SQS com inbox transacional e testes reais de falha/reentrega continuam pendentes.
 
 ## 1. Domínio
 
@@ -40,7 +40,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Testar que ledger não pode ser apagado.
 - [x] Testar aplicação e reversão completa das migrations em banco descartável.
 - [ ] Ampliar testes de constraints de unicidade e integridade do schema.
-- [ ] Testar reentrega da inbox e disputa concorrente para reivindicar eventos da outbox.
+- [x] Testar publisher e política de retry da outbox; integração real de concorrência/reentrega segue pendente.
 - [ ] Simular falhas e reinícios e confirmar que saldo e ledger continuam coerentes.
 
 ## 4. HTTP, Keycloak e autorização
@@ -61,7 +61,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 ## 5. SQS, inbox e outbox
 
 - [ ] Implementar consumidor SQS que grava inbox e efeitos financeiros na mesma transação SQL.
-- [ ] Implementar publisher da outbox com reivindicação segura por múltiplas instâncias, backoff e recuperação de leases.
+- [x] Implementar publisher da outbox com reivindicação segura por múltiplas instâncias, backoff e recuperação de leases.
 - [ ] Testar reentrega, retry, DLQ e interrupção entre commit e remoção da mensagem.
 - [ ] Testar interrupção entre publicação e confirmação da outbox; republicações preservam o mesmo `eventId`.
 - [ ] Testar encerramento seguro e recuperação após reinício.
@@ -79,6 +79,6 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 ## Próxima sequência de trabalho
 
 1. Implementar inbox no mesmo `UnitOfWork` do tratamento SQS.
-2. Implementar publisher outbox com claims concorrentes, leases e retry durável.
+2. Provar com LocalStack a disputa de claims concorrentes, recovery de lease e interrupção entre `SendMessage` e confirmação.
 3. Provar recuperação, DLQ e consistência com várias instâncias.
 4. Adicionar métricas e completar documentação de execução e demonstração.
