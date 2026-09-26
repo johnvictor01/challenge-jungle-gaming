@@ -24,9 +24,15 @@ services:
       AWS_SECRET_ACCESS_KEY: test
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - >-
-        until aws --endpoint-url=http://localstack:4566 sqs list-queues >/dev/null 2>&1; do sleep 2; done;
-        aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name ${SQS_QUEUE_NAME:-wager-events.fifo} --attributes FifoQueue=true,ContentBasedDeduplication=false --query QueueUrl --output text;
+      - |
+        set -e
+        endpoint=http://localstack:4566
+        until aws --endpoint-url=$$endpoint sqs list-queues >/dev/null 2>&1; do sleep 2; done
+        aws --endpoint-url=$$endpoint sqs create-queue --queue-name wager-transactions-dlq.fifo --attributes FifoQueue=true,ContentBasedDeduplication=false >/dev/null
+        printf '%s' '{"QueueName":"wager-transactions.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false","VisibilityTimeout":"60","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:wager-transactions-dlq.fifo\",\"maxReceiveCount\":\"5\"}"}}' > /tmp/wager-transactions-queue.json
+        aws --endpoint-url=$$endpoint sqs create-queue --cli-input-json file:///tmp/wager-transactions-queue.json >/dev/null
+        aws --endpoint-url=$$endpoint sqs create-queue --queue-name ${SQS_QUEUE_NAME:-wager-events.fifo} --attributes FifoQueue=true,ContentBasedDeduplication=false >/dev/null
+        echo 'SQS queues are ready'
 
 volumes:
   localstack_data:

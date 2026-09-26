@@ -12,11 +12,12 @@
 - `ProcessWagerService`: valida idempotência, resolve regras de aposta e movimenta a carteira conforme `BET`, `WIN`, `LOSS`, `REFUND` ou `ROLLBACK`.
 - `ResolvePendingReferenceService`: tenta novamente operações em `PENDING_REFERENCE`, agenda backoff exponencial ou rejeita depois de dez tentativas padrão.
 - `OutboxDispatcher`: reivindica eventos confirmados no banco, publica pelo port SQS e confirma ou agenda nova tentativa com backoff persistido.
+- `ProcessInboxWagerService`: calcula o mesmo hash de negócio usado por HTTP, registra o ID da mensagem e chama o processamento financeiro dentro da mesma transação SQL.
 - `QueryService`: consulta carteira/operação, pagina ledger com cursor opaco e compara saldo com o ledger sem alterar dados.
 
 ## Idempotência e reversões
 
-O hash SHA-256 é calculado de JSON determinístico com os campos de negócio; IDs internos, chave de idempotência e metadados de transporte ficam de fora. HTTP e SQS devem normalizar a entrada e chamar o mesmo cálculo.
+O hash SHA-256 é calculado de JSON determinístico com os campos de negócio; IDs internos, chave de idempotência e metadados de transporte ficam de fora. HTTP e SQS normalizam a entrada e chamam o mesmo cálculo.
 
 Uma repetição com chave e hash iguais devolve estado e saldo resultantes persistidos. Reutilizar a chave com payload diferente ou reaplicar o mesmo ID externo resulta em conflito. Só uma reversão `REFUND` ou `ROLLBACK` pode ser processada para a mesma referência.
 

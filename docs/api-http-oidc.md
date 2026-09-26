@@ -78,4 +78,4 @@ go test ./internal/adapters/http ./internal/adapters/postgres -count=1
 
 ## Estado e limites desta entrega
 
-A API consulta PostgreSQL e compartilha os casos de uso. Os testes de integração usam tokens Keycloak reais e PostgreSQL real. O consumidor SQS, o publisher da outbox, métricas e a readiness combinada com SQS ainda pertencem às fases seguintes.
+A API consulta PostgreSQL e compartilha os casos de uso com o consumidor SQS. Os testes de integração usam tokens Keycloak reais e PostgreSQL real; a integração SQS/inbox/outbox também tem testes com LocalStack. Métricas e readiness combinada com SQS continuam pendentes.
