@@ -18,10 +18,10 @@ Revisão do [README.md](../README.md) contra o código, os testes e os documento
 | Testes unitários, integração real e `-race` | Atendido | Comandos e dependências em `docs/demo.md`; testes reais cobrem os serviços locais. |
 | Encapsulamento das entidades e imutabilidade de `Money` | Atendido | Os campos das quatro entidades são privados; getters retornam valores/cópias e factories/reidratação validam os dados. |
 | Classificação de falhas técnicas como `FAILED` | Atendido | Tentativas de referência e publicação da outbox são persistidas; o limite da outbox é dez e eventos terminais deixam de bloquear os eventos seguintes do agregado. |
-| Controle de acesso ao broker | Atendido localmente | As filas de desenvolvimento usam LocalStack e credenciais locais de teste. Credenciais de produção são fornecidas pelo ambiente de deploy. |
+| Controle de acesso ao broker por credenciais e policies | Parcial | A aplicação usa as credenciais AWS do ambiente e o LocalStack aceita as credenciais locais `test/test`, mas o Compose não aplica policies às filas nem testa acesso permitido/negado. Em produção, roles e policies precisam ser configuradas no ambiente de deploy. |
 
 ## Resumo
 
-Não há requisitos do README pendentes na auditoria de implementação. As credenciais do broker de produção são configuração operacional do ambiente de deploy, fora do escopo do repositório.
+O fluxo funcional e os testes foram verificados com PostgreSQL, Keycloak e LocalStack locais. Permanece parcial a política de autorização do broker: o repositório não provisiona nem testa policies de SQS; as credenciais e permissões de produção precisam ser definidas no ambiente de deploy.
 
 Comandos de verificação recomendados estão em `docs/demo.md`. A execução precisa das variáveis de integração listadas em `.env.example` e das migrations aplicadas.

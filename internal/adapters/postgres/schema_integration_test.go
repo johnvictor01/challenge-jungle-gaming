@@ -129,7 +129,7 @@ func TestPostgresEnforcesWalletUniquenessAndProviderIsolation(t *testing.T) {
 		t.Fatalf("open wallet: %v", err)
 	}
 	_, err = application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{
-		PlayerID: playerID, InitialBalance: domain.Money{},
+		PlayerID: playerID, InitialBalance: testMoney(0, "BRL"),
 	})
 	if err != application.ErrWalletAlreadyExists {
 		t.Fatalf("duplicate wallet error = %v, want ErrWalletAlreadyExists", err)
@@ -139,7 +139,7 @@ func TestPostgresEnforcesWalletUniquenessAndProviderIsolation(t *testing.T) {
 		WalletID: opened.Wallet.ID(), PlayerID: opened.Wallet.PlayerID(), ProviderID: "provider-owned-" + playerID,
 		ExternalTransactionID: "provider-tx-" + playerID, IdempotencyKey: "provider-key-" + playerID,
 		RoundID: "round-1", GameID: "game-1", Kind: domain.TransactionLoss,
-		Amount: domain.Money{},
+		Amount: testMoney(0, "BRL"),
 	})
 	if err != nil {
 		t.Fatalf("create provider transaction: %v", err)
@@ -511,7 +511,52 @@ func integrationBetCommand(wallet *domain.Wallet, operationID, suffix string, am
 
 type postgresWorkerPayload struct {
 	DatabaseURL string
-	Commands    []application.ProcessWagerCommand
+	Commands    []postgresWorkerCommand
+}
+
+// postgresWorkerCommand is the JSON-safe form used to pass commands to the
+// subprocess. Money intentionally keeps its fields private, so the test wire
+// format spells out its minimal representation and rebuilds the domain value.
+type postgresWorkerCommand struct {
+	WalletID                       string
+	PlayerID                       string
+	ProviderID                     string
+	ExternalTransactionID          string
+	IdempotencyKey                 string
+	RoundID                        string
+	GameID                         string
+	Kind                           domain.TransactionKind
+	AmountUnits                    int64
+	AmountCurrency                 string
+	ReferenceExternalTransactionID string
+	TransactionID                  string
+	PayloadHash                    string
+	CorrelationID                  string
+}
+
+func workerCommandFrom(command application.ProcessWagerCommand) postgresWorkerCommand {
+	return postgresWorkerCommand{
+		WalletID: command.WalletID, PlayerID: command.PlayerID, ProviderID: command.ProviderID,
+		ExternalTransactionID: command.ExternalTransactionID, IdempotencyKey: command.IdempotencyKey,
+		RoundID: command.RoundID, GameID: command.GameID, Kind: command.Kind,
+		AmountUnits: command.Amount.Units(), AmountCurrency: command.Amount.Currency(),
+		ReferenceExternalTransactionID: command.ReferenceExternalTransactionID,
+		TransactionID:                  command.TransactionID, PayloadHash: command.PayloadHash, CorrelationID: command.CorrelationID,
+	}
+}
+
+func (command postgresWorkerCommand) processWagerCommand() (application.ProcessWagerCommand, error) {
+	amount, err := domain.NewMoney(command.AmountUnits, command.AmountCurrency)
+	if err != nil {
+		return application.ProcessWagerCommand{}, err
+	}
+	return application.ProcessWagerCommand{
+		WalletID: command.WalletID, PlayerID: command.PlayerID, ProviderID: command.ProviderID,
+		ExternalTransactionID: command.ExternalTransactionID, IdempotencyKey: command.IdempotencyKey,
+		RoundID: command.RoundID, GameID: command.GameID, Kind: command.Kind, Amount: amount,
+		ReferenceExternalTransactionID: command.ReferenceExternalTransactionID,
+		TransactionID:                  command.TransactionID, PayloadHash: command.PayloadHash, CorrelationID: command.CorrelationID,
+	}, nil
 }
 
 type postgresWorkerOutcome struct {
@@ -541,7 +586,11 @@ func TestPostgresWorkerProcess(t *testing.T) {
 	start := make(chan struct{})
 	outcomes := make([]postgresWorkerOutcome, len(payload.Commands))
 	var group sync.WaitGroup
-	for index, command := range payload.Commands {
+	for index, wireCommand := range payload.Commands {
+		command, err := wireCommand.processWagerCommand()
+		if err != nil {
+			t.Fatalf("rebuild worker command[%d]: %v", index, err)
+		}
 		group.Add(1)
 		go func(index int, command application.ProcessWagerCommand) {
 			defer group.Done()
@@ -575,7 +624,11 @@ func runPostgresWorkerProcesses(t *testing.T, databaseURL string, groups [][]app
 	}
 	workers := make([]*worker, 0, len(groups))
 	for _, commands := range groups {
-		payload, err := json.Marshal(postgresWorkerPayload{DatabaseURL: databaseURL, Commands: commands})
+		wireCommands := make([]postgresWorkerCommand, len(commands))
+		for index, command := range commands {
+			wireCommands[index] = workerCommandFrom(command)
+		}
+		payload, err := json.Marshal(postgresWorkerPayload{DatabaseURL: databaseURL, Commands: wireCommands})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -94,7 +94,10 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Encapsular `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry` com getters e reidratação validada.
 - [x] Classificar falhas técnicas repetidas ao resolver referência; persistir retry, evento de retry e `FAILED` com `REFERENCE_RESOLUTION_FAILED` no limite.
 - [x] Finalizar política de falha terminal da outbox após dez tentativas.
+- [x] Corrigir o transporte JSON dos testes concorrentes entre processos para reconstruir `Money` imutável com valor e moeda explícitos.
+- [x] Executar testes de integração PostgreSQL/SQS/LocalStack com `-race` nesta validação.
+- [x] Corrigir a auditoria para registrar que policies do broker não são provisionadas nem testadas pelo Compose local.
 
 ## Conclusão
 
-Os requisitos de implementação do README estão cobertos. Credenciais reais do broker são configuração do ambiente de deploy; `docs/demo.md` contém comandos e fluxos de demonstração.
+Os fluxos da aplicação foram implementados e verificados com PostgreSQL, Keycloak e LocalStack locais. A autorização por policy do broker permanece parcial: o Compose não cria policies SQS nem testa acessos permitidos/negados; esse item precisa de configuração no ambiente de deploy. `docs/demo.md` contém os comandos e fluxos de demonstração.

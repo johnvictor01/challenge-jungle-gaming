@@ -42,7 +42,7 @@ O consumidor usa a fila FIFO `wager-transactions.fifo`, timeout de visibilidade 
 
 O publisher reivindica eventos confirmados com lease e `FOR UPDATE SKIP LOCKED`. Envia fora da transação; marca como publicado depois. Se houver queda após o envio e antes da confirmação, republica o mesmo `eventId` (at-least-once). Retentativas usam backoff persistido. Os eventos têm tipo, versão, correlação, causa, instante UTC e dados tipados; `WalletBalanceChanged` registra antes/depois e versão da carteira.
 
-Credenciais e políticas AWS/LocalStack protegem acesso às filas. A identidade de um produtor SQS é a credencial/role AWS autorizada pelo broker, não o `provider_id` do OIDC. O consumidor valida o contrato e aplica as mesmas regras financeiras; em produção, permissões devem restringir quem publica na fila de entrada e quem lê/publica em cada fila.
+A identidade de um produtor SQS é a credencial/role AWS autorizada pelo broker, não o `provider_id` do OIDC. A aplicação usa a cadeia padrão de credenciais do SDK. No desenvolvimento, o LocalStack recebe `test/test` e não deve ser exposto como proteção de produção. O Compose atual não aplica policies às filas nem testa acesso permitido/negado; no deploy, configure policies/roles para restringir quem publica na fila de entrada e quem lê ou publica em cada fila. O consumidor valida o contrato e aplica as mesmas regras financeiras.
 
 ## Identidade e autorização
 
@@ -58,6 +58,6 @@ O processo configura `slog` com JSON. Os caminhos HTTP e SQS registram conclusã
 
 ## Limitações atuais
 
-- Credenciais de produção do broker são fornecidas pelo ambiente de deploy; o ambiente local usa LocalStack e credenciais de teste.
+- O Compose de desenvolvimento não provisiona ou valida policies de autorização do SQS. Credenciais e policies de produção precisam ser fornecidas e verificadas pelo ambiente de deploy.
 
 O mapeamento requisito por requisito, incluindo evidências e trabalho restante, está em [docs/AUDITORIA_README.md](docs/AUDITORIA_README.md). O progresso de testes está em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).
