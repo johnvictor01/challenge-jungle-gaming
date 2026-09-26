@@ -72,3 +72,11 @@ type LedgerSummary struct {
 type OutboxRepository interface {
 	Append(ctx context.Context, event OutboxEvent) error
 }
+
+// OutboxDispatchRepository administra leases para publicar eventos já commitados.
+// Claim precisa ser atômico entre instâncias e ignorar eventos com lease válida.
+type OutboxDispatchRepository interface {
+	Claim(ctx context.Context, owner string, limit int, lease time.Duration) ([]OutboxEvent, error)
+	MarkPublished(ctx context.Context, eventID, owner string, publishedAt time.Time) error
+	ScheduleRetry(ctx context.Context, eventID, owner string, nextAttemptAt time.Time, lastError string) error
+}

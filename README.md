@@ -465,6 +465,6 @@ Documente separadamente como preparar as dependências dos testes e executar int
 
 ## 16. Implementação atual
 
-A API HTTP, a validação OIDC com Keycloak, os casos de uso e o adapter PostgreSQL estão implementados. Os testes end-to-end passaram com Keycloak 26.2.5 e PostgreSQL 16. Os passos locais e as rotas estão em [docs/api-http-oidc.md](docs/api-http-oidc.md); as explicações por componente estão em [docs/implementacao/README.md](docs/implementacao/README.md). O consumidor SQS, a inbox e o publisher da outbox continuam como próxima etapa, conforme o roteiro em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).
+A API HTTP, a validação OIDC com Keycloak, os casos de uso, o adapter PostgreSQL e o publisher SQS da outbox estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. O consumidor SQS e a inbox transacional ainda precisam ser concluídos. Os passos locais estão em [docs/api-http-oidc.md](docs/api-http-oidc.md) e [docs/implementacao/README.md](docs/implementacao/README.md).
 
 Entregue código formatado com `gofmt` e dependências reproduzíveis.

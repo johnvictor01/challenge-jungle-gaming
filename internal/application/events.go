@@ -18,6 +18,7 @@ type OutboxEvent struct {
 	OccurredAt    time.Time       `json:"occurredAt"`
 	Version       int             `json:"version"`
 	Data          json.RawMessage `json:"data"`
+	Attempts      int             `json:"-"`
 }
 
 type wagerProcessedData struct {

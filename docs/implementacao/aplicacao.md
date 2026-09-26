@@ -11,6 +11,7 @@
 - `OpenWalletService`: cria uma carteira; com saldo inicial positivo grava `OPENING`, crédito no ledger e dois eventos. Com zero, cria somente a carteira.
 - `ProcessWagerService`: valida idempotência, resolve regras de aposta e movimenta a carteira conforme `BET`, `WIN`, `LOSS`, `REFUND` ou `ROLLBACK`.
 - `ResolvePendingReferenceService`: tenta novamente operações em `PENDING_REFERENCE`, agenda backoff exponencial ou rejeita depois de dez tentativas padrão.
+- `OutboxDispatcher`: reivindica eventos confirmados no banco, publica pelo port SQS e confirma ou agenda nova tentativa com backoff persistido.
 - `QueryService`: consulta carteira/operação, pagina ledger com cursor opaco e compara saldo com o ledger sem alterar dados.
 
 ## Idempotência e reversões
