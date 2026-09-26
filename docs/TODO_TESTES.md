@@ -1,80 +1,84 @@
-# Roteiro de testes
+# Roteiro de implementação e testes
 
-Este arquivo acompanha os testes pedidos no README. Os testes unitários de `Money`, `Wallet`, `WagerTransaction` e `WalletLedgerEntry` estão escritos e passaram localmente usando `GO111MODULE=off go test` dentro de `internal/domain`. O repositório ainda não tem `go.mod`, então o comando habitual `go test ./...` não funciona por enquanto. Os demais itens continuam como trabalho futuro.
+Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP e validação OIDC estão implementados. Fluxo end-to-end com Keycloak e PostgreSQL reais foi verificado; SQS/inbox/outbox ainda estão pendentes.
 
 ## 1. Domínio
 
-- [x] `ParseMoney`: valor válido convertido para unidades mínimas.
-- [x] `ParseMoney`: entradas inválidas rejeitadas.
-- [x] `ParseMoney`: overflow rejeitado.
-- [x] Valor zero associado a uma moeda.
-- [x] Soma na mesma moeda e overflow.
-- [x] Subtração exata, resultado negativo interno e overflow.
-- [x] Negação e overflow no menor valor representável.
-- [x] Comparação entre valores da mesma moeda.
-- [x] Soma, subtração e comparação rejeitam moedas diferentes com erro classificável.
-- [x] Serialização mantém duas casas decimais e a moeda.
-- [x] Invariantes de carteira: criação, reidratação, saldo não negativo, moeda, jogador, versão, crédito, débito, overflow e movimentações inválidas.
-- [x] Transições de estado de `WagerTransaction`, recusa, falha e proteção dos estados terminais.
-- [x] Regras de criação, valor e referência para `BET`, `WIN`, `LOSS`, `REFUND` e `ROLLBACK`.
-- [ ] Mesmo idempotency key com payload diferente deve gerar conflito.
-- [x] Política de valores zero conforme o tipo de operação (`LOSS` aceita zero; os demais tipos externos exigem valor positivo).
-- [x] Abertura interna (`OPENING`): identidade, metadados internos, saldo e estado processado.
-- [ ] Eventos da abertura interna são gravados na outbox junto com carteira e ledger.
-- [x] `WalletLedgerEntry`: criação de crédito/débito, direção, valor, moeda, cálculo, saldo, overflow, identificadores e reidratação; ver `internal/domain/wallet_ledger_entry_test.go`.
+- [x] `Money`: análise decimal exata, valores inválidos, overflow, operações aritméticas, comparação e serialização com moeda.
+- [x] `Wallet`: criação, reidratação, saldo não negativo, moeda, versão, crédito, débito e overflow.
+- [x] `WagerTransaction`: tipos, valores, referências e mudanças de estado permitidas.
+- [x] `OPENING`: operação interna processada para uma carteira com saldo inicial positivo.
+- [x] `WalletLedgerEntry`: direção, valor, moeda, saldos antes/depois, overflow, IDs e reidratação.
+- [ ] Ampliar a cobertura de combinações entre referências, `REFUND` e `ROLLBACK` nos testes PostgreSQL concorrentes.
 
-## 2. PostgreSQL e migrations
+## 2. Casos de uso
 
-- [ ] Migrations sobem e descem no PostgreSQL real.
-- [ ] Constraints protegem unicidade de carteira por jogador e moeda e demais invariantes do schema.
-- [ ] PostgreSQL garante unicidade de (carteira, transação) e impede UPDATE/DELETE no ledger.
-- [ ] Alteração financeira e registro correspondente são atômicos.
-- [ ] Inbox persiste a chave idempotente e permite reconhecer reentrega.
-- [ ] Outbox persiste eventos e permite publicação concorrente sem duplicação indevida.
-- [ ] Falha e reinício preservam transações, pendências e consistência.
+Os testes executáveis usam repositórios em memória para testar as regras e a atomicidade esperada da `UnitOfWork`. Eles não substituem os testes do adapter PostgreSQL.
 
-## 3. HTTP, autenticação e autorização
+- [x] `OpenWallet`: saldo positivo cria carteira, `OPENING`, ledger e dois eventos de outbox.
+- [x] `OpenWallet`: saldo zero cria só a carteira.
+- [x] `OpenWallet`: impede carteira duplicada por jogador e moeda e rejeita dados inválidos.
+- [x] `OpenWallet`: falha ao gravar outbox e não deixa alterações parciais.
+- [x] `ProcessWager`: aposta debitada, saldo insuficiente e `LOSS` sem alteração de saldo.
+- [x] `ProcessWager`: replay idempotente não repete débito, ledger ou eventos.
+- [x] `ProcessWager`: conflito quando a chave idempotente ou o ID externo é reutilizado incorretamente.
+- [x] `ProcessWager`: referência ausente fica `PENDING_REFERENCE`; reembolso com referência válida é aplicado.
+- [x] `ProcessWager`: rollback rejeitado por saldo insuficiente não altera saldo nem ledger.
+- [x] `ProcessWager`: segunda reversão bem-sucedida da mesma referência é rejeitada com `REFERENCE_ALREADY_REVERSED`.
+- [x] `ProcessWager`: erro ao gravar outbox reverte as gravações da `UnitOfWork` simulada.
+- [x] `ResolvePendingReference`: tenta novamente em referência ausente, persiste a próxima tentativa e rejeita com `REFERENCE_NOT_FOUND` quando o limite termina.
+- [x] `ResolvePendingReference`: retoma uma operação pendente quando a referência chega, aplicando saldo, ledger e eventos no mesmo fluxo.
+- [x] Hash canônico determinístico; o endpoint HTTP usa o caso de uso compartilhado que calcula o hash. O consumidor SQS também deverá usar esse caso de uso.
+- [x] Testar duas apostas simultâneas de `80.00` sobre saldo de `100.00`; uma processa e a outra é rejeitada.
+- [ ] Executar a retomada de referências pendentes em um worker real e testar sua recuperação após reinicialização com PostgreSQL.
 
-Ainda não há adaptador HTTP implementado. Quando ele existir, cobrir:
+## 3. PostgreSQL e migrations
 
-- [ ] Integração com o IdP real: credencial ausente, inválida e expirada são rejeitadas.
-- [ ] Um provedor não consulta nem reproduz operações de outro provedor.
-- [ ] Operações internas só podem ser chamadas por quem tem autorização.
-- [ ] Acesso não autorizado não altera saldo e não revela dados financeiros.
-- [ ] A mesma operação recebida por HTTP e SQS não movimenta o saldo duas vezes.
+- [x] Implementar repositórios e `UnitOfWork` PostgreSQL com `SELECT ... FOR UPDATE`, isolamento serializável e controle otimista de versão.
+- [x] Aplicar migrations em PostgreSQL real.
+- [x] Testar atomicidade de saldo, operação, ledger e outbox no fluxo de aposta.
+- [x] Testar que ledger não pode ser apagado.
+- [x] Testar aplicação e reversão completa das migrations em banco descartável.
+- [ ] Ampliar testes de constraints de unicidade e integridade do schema.
+- [ ] Testar reentrega da inbox e disputa concorrente para reivindicar eventos da outbox.
+- [ ] Simular falhas e reinícios e confirmar que saldo e ledger continuam coerentes.
 
-## 4. SQS, inbox e outbox
+## 4. HTTP, Keycloak e autorização
 
-Ainda não há consumidor ou publisher implementado. Quando existirem, cobrir:
+- [x] Implementar rotas do README e composição Uber Fx.
+- [x] Validar token OIDC por emissor, assinatura, audiência e validade.
+- [x] Usar o claim assinado `provider_id` e bloquear tentativa de informar outro provedor.
+- [x] Autorizar por papéis Keycloak e ocultar operações de outros provedores.
+- [x] Implementar paginação do ledger, reconciliação e health checks.
+- [x] Testar token ausente, papel ausente e spoofing de provedor.
+- [x] Importar o realm local em Keycloak 26.2.5 e obter token client credentials.
+- [x] Validar token e claim `provider_id` reais, rejeitando assinatura adulterada.
+- [x] Testar abrir carteira com client interno, processar aposta com token de provedor, consultar saldo, ledger, reconciliação e transação.
+- [ ] Testar tokens expirados contra Keycloak real.
+- [ ] Compartilhar o caso de uso e a idempotência com o consumidor SQS.
+- [ ] Adicionar métricas de resultados, latência e divergência de reconciliação.
 
-- [ ] Mensagem repetida é deduplicada usando a persistência da inbox.
-- [ ] Falha durante processamento permite retry e recuperação.
-- [ ] Mensagem que excede tentativas segue a política de DLQ.
-- [ ] Consumidor interrompido após commit e antes de apagar a mensagem suporta reentrega.
-- [ ] Dois publishers concorrentes não publicam incorretamente o mesmo evento da outbox.
-- [ ] Evento publicado pode ser recuperado após falha entre publicação e confirmação.
+## 5. SQS, inbox e outbox
 
-## 5. Concorrência e recuperação
+- [ ] Implementar consumidor SQS que grava inbox e efeitos financeiros na mesma transação SQL.
+- [ ] Implementar publisher da outbox com reivindicação segura por múltiplas instâncias, backoff e recuperação de leases.
+- [ ] Testar reentrega, retry, DLQ e interrupção entre commit e remoção da mensagem.
+- [ ] Testar interrupção entre publicação e confirmação da outbox; republicações preservam o mesmo `eventId`.
+- [ ] Testar encerramento seguro e recuperação após reinício.
 
-- [ ] Enviar a mesma aposta 50 vezes em paralelo resulta em um único débito.
-- [ ] Duas apostas de `80.00` disputando saldo `100.00`: somente uma é debitada.
-- [ ] Operações em carteiras diferentes podem ocorrer em paralelo.
-- [ ] Repetir cenários relevantes com pelo menos três instâncias independentes.
-- [ ] `REFUND` ou `ROLLBACK` antes da referência é resolvido depois ou rejeitado conforme expiração.
-- [ ] Reiniciar a aplicação preserva idempotência, pendências e consistência financeira.
-- [ ] Saldo da carteira coincide com créditos menos débitos no ledger.
-- [ ] Deduplicação é comprovada por recebimentos repetidos reais.
-- [ ] Executar `go test -race` nos pacotes aplicáveis.
+## 6. Concorrência e recuperação
 
-## 6. Inicialização e encerramento
+- [ ] Enviar a mesma aposta 50 vezes em paralelo e confirmar um único débito.
+- [ ] Disputar saldo de `100.00` com duas apostas de `80.00` e confirmar que apenas uma é debitada.
+- [ ] Confirmar paralelismo em carteiras diferentes.
+- [ ] Repetir os cenários com pelo menos três instâncias independentes.
+- [ ] Validar referência que chega depois da operação que depende dela.
+- [ ] Conferir saldo contra créditos menos débitos do ledger.
+- [ ] Executar `go test -race ./...` e os testes de integração com dependências reais.
 
-- [ ] Composição Fx inicia os componentes necessários.
-- [ ] Encerramento Fx para os workers e libera conexões e demais recursos.
+## Próxima sequência de trabalho
 
-## Próximos passos sugeridos
-
-1. Criar o caso de uso que coordena a transação, a carteira e o ledger, com testes para sucesso, recusa, repetição e conflito de idempotência.
-2. Conectar esse caso de uso aos repositórios PostgreSQL e garantir que saldo, transação e ledger sejam confirmados juntos.
-3. Depois cobrir outbox/inbox e integração com SQS, e então os fluxos HTTP/autenticação e concorrência descritos acima.
-
-Os testes unitários de domínio marcados como feitos foram executados e passaram. Os itens restantes ainda não foram implementados ou verificados. Os arquivos de teste de integração para PostgreSQL e SQS são apenas lembretes com comentários, não testes executáveis.
+1. Implementar inbox no mesmo `UnitOfWork` do tratamento SQS.
+2. Implementar publisher outbox com claims concorrentes, leases e retry durável.
+3. Provar recuperação, DLQ e consistência com várias instâncias.
+4. Adicionar métricas e completar documentação de execução e demonstração.
