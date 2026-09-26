@@ -26,13 +26,8 @@ func ParseMoney(amount string, currency string) (Money, error) {
 	if amount == "" {
 		return Money{}, errors.New("amount cannot be empty")
 	}
-	if len(currency) != 3 {
-		return Money{}, errors.New("currency must be a three-letter ISO code")
-	}
-	for _, char := range currency {
-		if char < 'A' || char > 'Z' {
-			return Money{}, errors.New("currency must be an uppercase ISO code")
-		}
+	if !validCurrency(currency) {
+		return Money{}, errors.New("currency must be a valid uppercase ISO 4217 code")
 	}
 	if strings.HasPrefix(amount, "-") || strings.HasPrefix(amount, "+") {
 		return Money{}, errors.New("amount cannot be negative or signed")

@@ -469,4 +469,6 @@ Documente separadamente como preparar as dependências dos testes e executar int
 
 A API HTTP, a validação OIDC com Keycloak, os casos de uso, o worker de retomada de referências, o adapter PostgreSQL, o consumidor SQS com inbox transacional, o publisher da outbox, métricas e readiness combinada estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. Veja o roteiro de execução e apresentação em [docs/demo.md](docs/demo.md), as decisões em [ARCHITECTURE.md](ARCHITECTURE.md) e a cobertura em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).
 
+A auditoria requisito por requisito e as limitações ainda abertas estão em [docs/AUDITORIA_README.md](docs/AUDITORIA_README.md).
+
 Entregue código formatado com `gofmt` e dependências reproduzíveis.

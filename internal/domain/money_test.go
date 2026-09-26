@@ -28,6 +28,9 @@ func TestParseMoneyRejectsInvalidAmounts(t *testing.T) {
 	if _, err := ParseMoney("1.00", "brl"); err == nil {
 		t.Error("moeda fora do padrão maiúsculo deveria ser recusada")
 	}
+	if _, err := ParseMoney("1.00", "ZZZ"); err == nil {
+		t.Error("código de moeda fora do ISO 4217 deveria ser recusado")
+	}
 }
 
 // TestParseMoneyRejectsOverflow: valor que não cabe em int64 é recusado.
