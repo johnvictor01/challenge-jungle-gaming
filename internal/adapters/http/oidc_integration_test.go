@@ -66,6 +66,129 @@ func TestKeycloakClientCredentialsToken(t *testing.T) {
 	}
 }
 
+func TestKeycloakExpiredTokenIsRejectedByProtectedRoute(t *testing.T) {
+	issuer := os.Getenv("TEST_OIDC_ISSUER_URL")
+	providerSecret := os.Getenv("TEST_PROVIDER_CLIENT_SECRET")
+	if issuer == "" || providerSecret == "" {
+		t.Skip("set TEST_OIDC_ISSUER_URL and TEST_PROVIDER_CLIENT_SECRET for Keycloak integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	adminToken := getKeycloakAdminToken(t, ctx, issuer)
+	realmURL := keycloakRealmAdminURL(issuer)
+	var realm map[string]any
+	keycloakAdminRequest(t, ctx, http.MethodGet, realmURL, adminToken, nil, http.StatusOK, &realm)
+	previousLifetime, ok := realm["accessTokenLifespan"].(float64)
+	if !ok {
+		t.Fatalf("realm accessTokenLifespan is missing or invalid: %v", realm["accessTokenLifespan"])
+	}
+	t.Cleanup(func() {
+		realm["accessTokenLifespan"] = previousLifetime
+		keycloakAdminRequest(t, context.Background(), http.MethodPut, realmURL, adminToken, realm, http.StatusNoContent, nil)
+	})
+	realm["accessTokenLifespan"] = float64(1)
+	keycloakAdminRequest(t, ctx, http.MethodPut, realmURL, adminToken, realm, http.StatusNoContent, nil)
+	token := getClientToken(t, ctx, issuer, "provider-a", providerSecret)
+	time.Sleep(2 * time.Second)
+	authenticator, err := NewOIDCAuthenticator(ctx, issuer, "wager-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authenticator.Authenticate(ctx, token); err == nil {
+		t.Fatal("expired Keycloak access token was accepted by the OIDC verifier")
+	}
+	handler := NewHandler(nil, nil, nil, authenticator, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequest(http.MethodGet, "/wallets/not-a-wallet", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expired-token protected route status=%d body=%s, want 401", response.Code, response.Body.String())
+	}
+}
+
+func getKeycloakAdminToken(t *testing.T, ctx context.Context, issuer string) string {
+	t.Helper()
+	adminURL, err := url.Parse(issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminURL.Path = "/realms/master/protocol/openid-connect/token"
+	username := os.Getenv("KEYCLOAK_ADMIN")
+	password := os.Getenv("KEYCLOAK_ADMIN_PASSWORD")
+	if username == "" {
+		username = "admin"
+	}
+	if password == "" {
+		password = "admin-local-only"
+	}
+	form := url.Values{"grant_type": {"password"}, "client_id": {"admin-cli"}, "username": {username}, "password": {password}}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("get local Keycloak admin token: %v", err)
+	}
+	defer response.Body.Close()
+	var token struct {
+		AccessToken string `json:"access_token"`
+	}
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("Keycloak admin token status=%d body=%s", response.StatusCode, body)
+	}
+	if err := json.NewDecoder(response.Body).Decode(&token); err != nil || token.AccessToken == "" {
+		t.Fatalf("decode Keycloak admin token: %v", err)
+	}
+	return token.AccessToken
+}
+
+func keycloakRealmAdminURL(issuer string) string {
+	parsed, err := url.Parse(issuer)
+	if err != nil {
+		return ""
+	}
+	parsed.Path = "/admin/realms/backend-challenge"
+	return parsed.String()
+}
+
+func keycloakAdminRequest(t *testing.T, ctx context.Context, method, endpoint, token string, body any, wantStatus int, output any) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = strings.NewReader(string(encoded))
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("Keycloak admin %s %s: %v", method, endpoint, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != wantStatus {
+		payload, _ := io.ReadAll(response.Body)
+		t.Fatalf("Keycloak admin %s status=%d body=%s, want %d", method, response.StatusCode, payload, wantStatus)
+	}
+	if output != nil {
+		if err := json.NewDecoder(response.Body).Decode(output); err != nil {
+			t.Fatalf("decode Keycloak admin response: %v", err)
+		}
+	}
+}
+
 func TestKeycloakHTTPPostgresWalletAndWagerFlow(t *testing.T) {
 	issuer := os.Getenv("TEST_OIDC_ISSUER_URL")
 	providerSecret := os.Getenv("TEST_PROVIDER_CLIENT_SECRET")

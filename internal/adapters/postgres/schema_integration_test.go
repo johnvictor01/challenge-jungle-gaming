@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/application"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/platform"
 )
 
 func integrationPlayerID(t *testing.T) string {
@@ -162,7 +165,13 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 	commandB := integrationBetCommand(opened.Wallet, operationID, "b", 8_000)
 	results := runPostgresWorkerProcesses(t, os.Getenv("TEST_DATABASE_URL"), [][]application.ProcessWagerCommand{{commandA}, {commandB}, {commandA}})
 	var processed, rejected int
+	byTransactionID := map[string][]domain.TransactionStatus{}
 	for _, result := range results {
+		if result.Error != "" {
+			t.Errorf("worker operation failed: %s", result.Error)
+			continue
+		}
+		byTransactionID[result.TransactionID] = append(byTransactionID[result.TransactionID], domain.TransactionStatus(result.Status))
 		switch domain.TransactionStatus(result.Status) {
 		case domain.TransactionProcessed:
 			processed++
@@ -175,8 +184,17 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 			t.Errorf("unexpected status %s", result.Status)
 		}
 	}
-	if processed+rejected != 3 || rejected != 1 {
-		t.Fatalf("results processed/rejected = %d/%d, want three results containing exactly one rejection", processed, rejected)
+	if processed+rejected != 3 || (processed != 1 && processed != 2) {
+		t.Fatalf("results processed/rejected = %d/%d, want exactly one debit and its possible idempotent replay", processed, rejected)
+	}
+	duplicateReplayConsistent := false
+	for _, statuses := range byTransactionID {
+		if len(statuses) == 2 && statuses[0] == statuses[1] {
+			duplicateReplayConsistent = true
+		}
+	}
+	if !duplicateReplayConsistent {
+		t.Fatalf("duplicate operation did not return one consistent persisted outcome: %+v", byTransactionID)
 	}
 	var balance int64
 	if err := store.pool.QueryRow(context.Background(), "SELECT balance_minor FROM wallets WHERE id = $1", opened.Wallet.ID).Scan(&balance); err != nil {
@@ -280,6 +298,155 @@ func TestPostgresDifferentWalletsProcessInParallelAndReconcileWithLedger(t *test
 	}
 }
 
+func TestPostgresConcurrentRefundAndRollbackApplyOnlyOneReversal(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	operationID := integrationPlayerID(t)
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bet := integrationBetCommand(opened.Wallet, operationID, "reference-bet", 2_500)
+	betResult, err := application.NewProcessWagerService(store, ids).Execute(context.Background(), bet)
+	if err != nil || betResult.Status != domain.TransactionProcessed {
+		t.Fatalf("reference bet = %+v error=%v", betResult, err)
+	}
+	refund := integrationBetCommand(opened.Wallet, operationID, "refund", 2_500)
+	refund.Kind, refund.ReferenceExternalTransactionID = domain.TransactionRefund, bet.ExternalTransactionID
+	rollback := integrationBetCommand(opened.Wallet, operationID, "rollback", 2_500)
+	rollback.Kind, rollback.ReferenceExternalTransactionID = domain.TransactionRollback, bet.ExternalTransactionID
+	results := runPostgresWorkerProcesses(t, os.Getenv("TEST_DATABASE_URL"), [][]application.ProcessWagerCommand{{refund}, {rollback}, {refund}})
+	processed, rejected := 0, 0
+	byTransactionID := map[string][]domain.TransactionStatus{}
+	for _, result := range results {
+		if result.Error != "" {
+			t.Errorf("concurrent reversal returned error: %s (result=%+v)", result.Error, result)
+			continue
+		}
+		byTransactionID[result.TransactionID] = append(byTransactionID[result.TransactionID], domain.TransactionStatus(result.Status))
+		switch domain.TransactionStatus(result.Status) {
+		case domain.TransactionProcessed:
+			processed++
+		case domain.TransactionRejected:
+			rejected++
+		default:
+			t.Errorf("unexpected reversal result: %+v", result)
+		}
+	}
+	if processed+rejected != 3 || processed < 1 || processed > 2 {
+		t.Fatalf("reversal outcomes processed/rejected=%d/%d, want one effective reversal and its consistent replay", processed, rejected)
+	}
+	duplicateReplayConsistent := false
+	for _, statuses := range byTransactionID {
+		if len(statuses) == 2 && statuses[0] == statuses[1] {
+			duplicateReplayConsistent = true
+		}
+	}
+	if !duplicateReplayConsistent {
+		t.Fatalf("duplicate reversal did not return its persisted outcome: %+v", byTransactionID)
+	}
+	var reversals int
+	if err := store.pool.QueryRow(context.Background(), "SELECT count(*) FROM wager_transactions WHERE wallet_id=$1 AND kind IN ('REFUND','ROLLBACK') AND status='PROCESSED'", opened.Wallet.ID).Scan(&reversals); err != nil {
+		t.Fatal(err)
+	}
+	if reversals != 1 {
+		t.Fatalf("processed reversal count=%d, want 1", reversals)
+	}
+	reconciliation, err := application.NewQueryService(store).Reconcile(context.Background(), opened.Wallet.ID)
+	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != 10_000 || reconciliation.CheckedEntries != 3 {
+		t.Fatalf("reconciliation=%+v error=%v, want balance 10000 and three ledger entries", reconciliation, err)
+	}
+}
+
+func TestPostgresEnforcesWalletCurrencyAndExternalIdempotencyConstraints(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	playerID := integrationPlayerID(t)
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: playerID, InitialBalance: domain.Money{Units: 5_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateID, err := ids.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.pool.Exec(context.Background(), `INSERT INTO wallets (id, player_id, currency, balance_minor, version, created_at, updated_at)
+		VALUES ($1,$2,'BRL',0,1,now(),now())`, duplicateID, playerID)
+	assertUniqueConstraint(t, err, "wallet player/currency unique index")
+	_, err = store.pool.Exec(context.Background(), "UPDATE wallets SET balance_minor=-1 WHERE id=$1", opened.Wallet.ID)
+	assertPostgresConstraintCode(t, err, "23514", "wallet non-negative balance check")
+
+	command := integrationBetCommand(opened.Wallet, integrationPlayerID(t), "unique-source", 500)
+	if _, err := application.NewProcessWagerService(store, ids).Execute(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	duplicateTransactionID, err := ids.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.pool.Exec(context.Background(), `INSERT INTO wager_transactions (
+		id, origin, wallet_id, player_id, currency, provider_id, external_transaction_id, idempotency_key, payload_hash,
+		kind, amount_minor, round_id, game_id, status, failure_code, result_balance_minor, result_currency, attempt_count, created_at, updated_at, processed_at)
+		SELECT $1, origin, wallet_id, player_id, currency, provider_id, 'different-external-id', idempotency_key, payload_hash,
+		kind, amount_minor, round_id, game_id, status, failure_code, result_balance_minor, result_currency, attempt_count, created_at, updated_at, processed_at
+		FROM wager_transactions WHERE provider_id=$2 AND idempotency_key=$3`, duplicateTransactionID, command.ProviderID, command.IdempotencyKey)
+	assertUniqueConstraint(t, err, "provider/idempotency unique index")
+}
+
+func TestPostgresRejectedReversalDoesNotReserveReference(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	operationID := integrationPlayerID(t)
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := application.NewProcessWagerService(store, ids)
+	invalidRefund := integrationBetCommand(opened.Wallet, operationID, "invalid-refund", 1_000)
+	invalidRefund.Kind = domain.TransactionRefund
+	invalidRefund.ReferenceExternalTransactionID = "late-bet-" + operationID
+	pending, err := service.Execute(context.Background(), invalidRefund)
+	if err != nil || pending.Status != domain.TransactionPendingReference {
+		t.Fatalf("invalid refund initial state = %+v error=%v", pending, err)
+	}
+	bet := integrationBetCommand(opened.Wallet, operationID, "late-bet", 2_500)
+	bet.ExternalTransactionID = invalidRefund.ReferenceExternalTransactionID
+	if _, err := service.Execute(context.Background(), bet); err != nil {
+		t.Fatal(err)
+	}
+	resolver := application.NewResolvePendingReferenceService(store, ids, application.ReferenceRetryPolicy{MaxAttempts: 3, RetryDelay: func(int) time.Duration { return 0 }})
+	if _, err := resolver.Execute(context.Background(), pending.TransactionID); err != nil {
+		t.Fatal(err)
+	}
+	var status, failure string
+	if err := store.pool.QueryRow(context.Background(), "SELECT status, failure_code FROM wager_transactions WHERE id=$1", pending.TransactionID).Scan(&status, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(domain.TransactionRejected) || failure != "INVALID_REFERENCE" {
+		t.Fatalf("invalid refund status/failure=%s/%s", status, failure)
+	}
+	validRefund := integrationBetCommand(opened.Wallet, operationID, "valid-refund", 2_500)
+	validRefund.Kind = domain.TransactionRefund
+	validRefund.ReferenceExternalTransactionID = bet.ExternalTransactionID
+	result, err := service.Execute(context.Background(), validRefund)
+	if err != nil || result.Status != domain.TransactionProcessed {
+		t.Fatalf("valid refund after rejected one = %+v error=%v", result, err)
+	}
+}
+
+func assertUniqueConstraint(t *testing.T, err error, constraint string) {
+	t.Helper()
+	assertPostgresConstraintCode(t, err, "23505", constraint)
+}
+
+func assertPostgresConstraintCode(t *testing.T, err error, code, constraint string) {
+	t.Helper()
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) || postgresError.Code != code {
+		t.Fatalf("%s error = %v, want PostgreSQL constraint violation %s", constraint, err, code)
+	}
+}
+
 func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
 	store := integrationStore(t)
 	ids := application.UUIDGenerator{}
@@ -316,8 +483,16 @@ func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
 	if err != nil || betResult.Status != domain.TransactionProcessed {
 		t.Fatalf("reference operation = %+v error=%v, want PROCESSED", betResult, err)
 	}
-	resolved, err := application.NewResolvePendingReferenceService(restartedStore, ids, application.ReferenceRetryPolicy{}).Execute(context.Background(), pendingResult.TransactionID)
-	if err != nil || resolved.Status != domain.TransactionProcessed || resolved.Balance == nil || resolved.Balance.Units != 5_000 {
+	resolver := application.NewResolvePendingReferenceService(restartedStore, ids, application.ReferenceRetryPolicy{})
+	worker, err := platform.NewPendingReferenceWorker(restartedStore, resolver, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := application.NewQueryService(restartedStore).Transaction(context.Background(), pendingResult.TransactionID)
+	if err != nil || resolved.Status != domain.TransactionProcessed || resolved.ResultBalance == nil || resolved.ResultBalance.Units != 5_000 {
 		t.Fatalf("resumed operation = %+v error=%v, want PROCESSED with balance 5000", resolved, err)
 	}
 	reconciliation, err := application.NewQueryService(restartedStore).Reconcile(context.Background(), opened.Wallet.ID)
@@ -373,7 +548,7 @@ func TestPostgresWorkerProcess(t *testing.T) {
 			<-start
 			result, err := service.Execute(context.Background(), command)
 			if err != nil {
-				outcomes[index].Error = err.Error()
+				outcomes[index].Error = fmt.Sprintf("command[%d]: %v", index, err)
 				return
 			}
 			outcomes[index] = postgresWorkerOutcome{Status: string(result.Status), TransactionID: result.TransactionID, FailureCode: result.FailureCode, Balance: result.Balance, IdempotentReplay: result.IdempotentReplay}
