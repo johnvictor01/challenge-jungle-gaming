@@ -2,10 +2,12 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/application"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
 )
@@ -80,6 +82,87 @@ func (r ledgerRepository) SummarizeByWallet(ctx context.Context, walletID string
 
 type outboxRepository struct{ tx pgx.Tx }
 
+// OutboxDispatcherRepository usa o pool fora da UnitOfWork do domínio: cada claim
+// e confirmação é uma transação curta, separada do envio de rede ao SQS.
+type OutboxDispatcherRepository struct{ pool *pgxpool.Pool }
+
+func NewOutboxDispatcherRepository(store *Store) *OutboxDispatcherRepository {
+	return &OutboxDispatcherRepository{pool: store.pool}
+}
+
+func (r *OutboxDispatcherRepository) Claim(ctx context.Context, owner string, limit int, lease time.Duration) ([]application.OutboxEvent, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `WITH candidates AS (
+		SELECT event_id FROM outbox_events
+		WHERE published_at IS NULL AND next_attempt_at <= now()
+		  AND (lease_until IS NULL OR lease_until <= now())
+		ORDER BY occurred_at, event_id
+		FOR UPDATE SKIP LOCKED LIMIT $1
+	)
+	UPDATE outbox_events AS e
+	SET lease_owner = $2, lease_until = now() + $3::interval, attempts = attempts + 1
+	FROM candidates c WHERE e.event_id = c.event_id
+	RETURNING e.event_id, e.event_type, e.aggregate_id, e.event_version,
+	          e.correlation_id, e.causation_id, e.payload, e.occurred_at, e.attempts`,
+		limit, owner, lease.String())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	defer rows.Close()
+	events := make([]application.OutboxEvent, 0)
+	for rows.Next() {
+		var event application.OutboxEvent
+		var causation *string
+		var data []byte
+		if err := rows.Scan(&event.EventID, &event.EventType, &event.AggregateID, &event.Version,
+			&event.CorrelationID, &causation, &data, &event.OccurredAt, &event.Attempts); err != nil {
+			return nil, mapError(err)
+		}
+		if causation != nil {
+			event.CausationID = *causation
+		}
+		event.Data = json.RawMessage(data)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, mapError(err)
+	}
+	return events, nil
+}
+
+func (r *OutboxDispatcherRepository) MarkPublished(ctx context.Context, eventID, owner string, publishedAt time.Time) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE outbox_events
+		SET published_at = $3, lease_owner = NULL, lease_until = NULL, last_error = NULL
+		WHERE event_id = $1 AND lease_owner = $2 AND published_at IS NULL`, eventID, owner, publishedAt)
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return application.ErrOutboxLeaseLost
+	}
+	return nil
+}
+
+func (r *OutboxDispatcherRepository) ScheduleRetry(ctx context.Context, eventID, owner string, nextAttemptAt time.Time, lastError string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE outbox_events
+		SET next_attempt_at = $3, lease_owner = NULL, lease_until = NULL, last_error = $4
+		WHERE event_id = $1 AND lease_owner = $2 AND published_at IS NULL`, eventID, owner, nextAttemptAt, lastError)
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return application.ErrOutboxLeaseLost
+	}
+	return nil
+}
+
 func (r outboxRepository) Append(ctx context.Context, event application.OutboxEvent) error {
 	_, err := r.tx.Exec(ctx, `INSERT INTO outbox_events
         (event_id, aggregate_id, event_type, event_version, correlation_id,
@@ -92,3 +175,4 @@ func (r outboxRepository) Append(ctx context.Context, event application.OutboxEv
 
 var _ application.WalletLedgerRepository = ledgerRepository{}
 var _ application.OutboxRepository = outboxRepository{}
+var _ application.OutboxDispatchRepository = (*OutboxDispatcherRepository)(nil)
