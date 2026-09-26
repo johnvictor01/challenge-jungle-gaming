@@ -245,6 +245,87 @@ func TestPostgresSameWagerIsIdempotentAcrossFiftyRequestsAndThreeProcesses(t *te
 	}
 }
 
+func TestPostgresDifferentWalletsProcessInParallelAndReconcileWithLedger(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	open := application.NewOpenWalletService(store, ids)
+	first, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 10_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 20_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]application.ProcessWagerCommand{{integrationBetCommand(first.Wallet, integrationPlayerID(t), "first-wallet", 2_000)}, {integrationBetCommand(second.Wallet, integrationPlayerID(t), "second-wallet", 3_000)}}
+	results := runPostgresWorkerProcesses(t, os.Getenv("TEST_DATABASE_URL"), commands)
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want two", len(results))
+	}
+	for _, result := range results {
+		if result.Error != "" || domain.TransactionStatus(result.Status) != domain.TransactionProcessed {
+			t.Errorf("wallet operation result = %+v", result)
+		}
+	}
+	queries := application.NewQueryService(store)
+	for _, expected := range []struct {
+		walletID string
+		balance  int64
+		entries  int64
+	}{{first.Wallet.ID, 8_000, 2}, {second.Wallet.ID, 17_000, 2}} {
+		reconciliation, err := queries.Reconcile(context.Background(), expected.walletID)
+		if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != expected.balance || reconciliation.CalculatedBalance.Units != expected.balance || reconciliation.CheckedEntries != expected.entries {
+			t.Errorf("reconciliation for wallet %s = %+v error=%v, want balance=%d entries=%d", expected.walletID, reconciliation, err, expected.balance, expected.entries)
+		}
+	}
+}
+
+func TestPostgresPendingReferenceResumesAfterServiceRestart(t *testing.T) {
+	store := integrationStore(t)
+	ids := application.UUIDGenerator{}
+	opened, err := application.NewOpenWalletService(store, ids).Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 5_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID := integrationPlayerID(t)
+	pending := application.ProcessWagerCommand{
+		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: "pending-provider-" + operationID,
+		ExternalTransactionID: "late-refund-" + operationID, IdempotencyKey: "late-refund-key-" + operationID,
+		RoundID: "round-pending", GameID: "game-pending", Kind: domain.TransactionRefund,
+		Amount: domain.Money{Units: 2_500, Currency: "BRL"}, ReferenceExternalTransactionID: "late-bet-" + operationID,
+	}
+	pendingResult, err := application.NewProcessWagerService(store, ids).Execute(context.Background(), pending)
+	if err != nil || pendingResult.Status != domain.TransactionPendingReference {
+		t.Fatalf("initial operation = %+v error=%v, want PENDING_REFERENCE", pendingResult, err)
+	}
+	// Encerrar o primeiro pool representa a parada do processo: a retomada só
+	// pode depender dos dados persistidos, não do estado em memória.
+	store.Close()
+	restartedStore, err := NewPool(context.Background(), os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restartedStore.Close()
+	bet := application.ProcessWagerCommand{
+		WalletID: opened.Wallet.ID, PlayerID: opened.Wallet.PlayerID, ProviderID: pending.ProviderID,
+		ExternalTransactionID: pending.ReferenceExternalTransactionID, IdempotencyKey: "late-bet-key-" + operationID,
+		RoundID: pending.RoundID, GameID: "game-pending", Kind: domain.TransactionBet,
+		Amount: domain.Money{Units: 2_500, Currency: "BRL"},
+	}
+	betResult, err := application.NewProcessWagerService(restartedStore, ids).Execute(context.Background(), bet)
+	if err != nil || betResult.Status != domain.TransactionProcessed {
+		t.Fatalf("reference operation = %+v error=%v, want PROCESSED", betResult, err)
+	}
+	resolved, err := application.NewResolvePendingReferenceService(restartedStore, ids, application.ReferenceRetryPolicy{}).Execute(context.Background(), pendingResult.TransactionID)
+	if err != nil || resolved.Status != domain.TransactionProcessed || resolved.Balance == nil || resolved.Balance.Units != 5_000 {
+		t.Fatalf("resumed operation = %+v error=%v, want PROCESSED with balance 5000", resolved, err)
+	}
+	reconciliation, err := application.NewQueryService(restartedStore).Reconcile(context.Background(), opened.Wallet.ID)
+	if err != nil || !reconciliation.Consistent || reconciliation.StoredBalance.Units != 5_000 || reconciliation.CalculatedBalance.Units != 5_000 || reconciliation.CheckedEntries != 3 {
+		t.Fatalf("reconciliation=%+v error=%v, want consistent balance 5000 with opening, bet, and refund entries", reconciliation, err)
+	}
+}
+
 func integrationBetCommand(wallet *domain.Wallet, operationID, suffix string, amount int64) application.ProcessWagerCommand {
 	return application.ProcessWagerCommand{
 		WalletID: wallet.ID, PlayerID: wallet.PlayerID, ProviderID: "concurrent-provider-" + operationID,

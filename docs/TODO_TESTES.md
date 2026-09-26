@@ -30,7 +30,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] `ResolvePendingReference`: retoma uma operação pendente quando a referência chega, aplicando saldo, ledger e eventos no mesmo fluxo.
 - [x] Hash canônico determinístico compartilhado entre HTTP e SQS.
 - [x] Testar duas apostas simultâneas de `80.00` sobre saldo de `100.00`; uma processa e a outra é rejeitada.
-- [ ] Executar a retomada de referências pendentes em um worker real e testar sua recuperação após reinicialização com PostgreSQL.
+- [x] Com PostgreSQL, persistir uma referência pendente, encerrar o pool/serviço, iniciar uma nova instância, inserir a referência e retomar a operação com sucesso.
 
 ## 3. PostgreSQL e migrations
 
@@ -41,7 +41,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Testar aplicação e reversão completa das migrations em banco descartável.
 - [ ] Ampliar testes de constraints de unicidade e integridade do schema.
 - [x] Testar publisher, retry, disputa real de claims e ordenação por agregado.
-- [ ] Simular falhas e reinícios e confirmar que saldo e ledger continuam coerentes.
+- [x] Simular parada e reinício do serviço durante referência pendente e confirmar que saldo e ledger continuam coerentes.
 
 ## 4. HTTP, Keycloak e autorização
 
@@ -70,14 +70,14 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 
 - [x] Enviar a mesma aposta 50 vezes em paralelo, distribuídas por três processos PostgreSQL independentes, e confirmar um único débito, transação e par de eventos.
 - [x] Disputar saldo de `100.00` com duas apostas de `80.00` em três processos independentes e confirmar que apenas uma é debitada.
-- [ ] Confirmar paralelismo em carteiras diferentes.
+- [x] Confirmar processamento de carteiras diferentes por processos independentes e validar cada saldo pelo ledger.
 - [x] Repetir os cenários de idempotência e disputa de saldo com três processos independentes, cada um com seu próprio pool PostgreSQL.
-- [ ] Validar referência que chega depois da operação que depende dela.
-- [ ] Conferir saldo contra créditos menos débitos do ledger.
-- [ ] Executar `go test -race ./...` e os testes de integração com dependências reais.
+- [x] Validar referência que chega depois da operação que depende dela, inclusive retomada após reinício.
+- [x] Conferir saldo contra créditos menos débitos do ledger nos cenários concorrentes e de retomada.
+- [x] Executar `go test -race ./...` e os testes PostgreSQL de integração com dependência real.
 
 ## Próxima sequência de trabalho
 
-1. Na etapa 6, validar carteiras diferentes em paralelo, retomada de referências pendentes após reinício e reconciliação do ledger sob concorrência.
+1. Na etapa 6, ampliar as combinações concorrentes entre referências, `REFUND` e `ROLLBACK` e revisar constraints de integridade do schema.
 2. Adicionar métricas e readiness que também consulte SQS.
 3. Completar a documentação de execução e preparar a demonstração.
