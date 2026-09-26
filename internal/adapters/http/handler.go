@@ -172,9 +172,11 @@ func (h *Handler) createWager(w http.ResponseWriter, r *http.Request) {
 		ReferenceExternalTransactionID: request.ReferenceExternalTransactionID, CorrelationID: r.Header.Get("X-Correlation-ID"),
 	})
 	if err != nil {
+		h.logger.Error("wager request failed", "correlation_id", r.Header.Get("X-Correlation-ID"), "external_transaction_id", request.ExternalTransactionID, "wallet_id", request.WalletID, "provider_id", principal.ProviderID, "error", err)
 		h.writeApplicationError(w, err)
 		return
 	}
+	h.logger.Info("wager request completed", "correlation_id", r.Header.Get("X-Correlation-ID"), "transaction_id", result.TransactionID, "wallet_id", request.WalletID, "provider_id", principal.ProviderID, "status", result.Status, "idempotent_replay", result.IdempotentReplay)
 	status := http.StatusOK
 	if result.Status == domain.TransactionPendingReference || result.Status == domain.TransactionPending {
 		status = http.StatusAccepted

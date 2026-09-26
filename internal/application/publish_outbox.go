@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type OutboxPublisher interface {
 
 type OutboxDispatchConfig struct {
 	Owner      string
+	Logger     *slog.Logger
 	BatchSize  int
 	Lease      time.Duration
 	RetryDelay func(attempt int) time.Duration
@@ -32,6 +34,7 @@ type OutboxDispatcher struct {
 	repository OutboxDispatchRepository
 	publisher  OutboxPublisher
 	config     OutboxDispatchConfig
+	logger     *slog.Logger
 }
 
 func NewOutboxDispatcher(repository OutboxDispatchRepository, publisher OutboxPublisher, config OutboxDispatchConfig) (*OutboxDispatcher, error) {
@@ -48,10 +51,13 @@ func NewOutboxDispatcher(repository OutboxDispatchRepository, publisher OutboxPu
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 	if config.RetryDelay == nil {
 		config.RetryDelay = ExponentialOutboxRetryDelay
 	}
-	return &OutboxDispatcher{repository: repository, publisher: publisher, config: config}, nil
+	return &OutboxDispatcher{repository: repository, publisher: publisher, config: config, logger: config.Logger}, nil
 }
 
 func ExponentialOutboxRetryDelay(attempt int) time.Duration {
@@ -83,6 +89,7 @@ func (d *OutboxDispatcher) DispatchBatch(ctx context.Context) (int, error) {
 		observability.Default.Observe("outbox_event_lag", lag)
 		if err := d.publisher.Publish(ctx, event); err != nil {
 			observability.Default.Inc("outbox_publish_retry")
+			d.logger.Error("outbox event publish failed", "event_id", event.EventID, "event_type", event.EventType, "aggregate_id", event.AggregateID, "correlation_id", event.CorrelationID, "attempt", event.Attempts, "error", err)
 			next := d.config.Now().Add(d.config.RetryDelay(event.Attempts))
 			if scheduleErr := d.repository.ScheduleRetry(ctx, event.EventID, d.config.Owner, next, err.Error()); scheduleErr != nil {
 				return len(events), errors.Join(fmt.Errorf("publish outbox event %s: %w", event.EventID, err), fmt.Errorf("schedule retry: %w", scheduleErr))
@@ -93,6 +100,7 @@ func (d *OutboxDispatcher) DispatchBatch(ctx context.Context) (int, error) {
 			return len(events), fmt.Errorf("mark outbox event %s published: %w", event.EventID, err)
 		}
 		observability.Default.Inc("outbox_event_published")
+		d.logger.Info("outbox event published", "event_id", event.EventID, "event_type", event.EventType, "aggregate_id", event.AggregateID, "correlation_id", event.CorrelationID)
 	}
 	return len(events), nil
 }

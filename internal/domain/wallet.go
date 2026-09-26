@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	xcurrency "golang.org/x/text/currency"
 )
 
 var (
@@ -159,15 +161,11 @@ func (w *Wallet) advanceVersion() error {
 }
 
 func validCurrency(currency string) bool {
-	if len(currency) != 3 {
+	if len(currency) != 3 || currency != strings.ToUpper(currency) {
 		return false
 	}
-	for _, char := range currency {
-		if char < 'A' || char > 'Z' {
-			return false
-		}
-	}
-	return true
+	_, err := xcurrency.ParseISO(currency)
+	return err == nil
 }
 
 func newWalletID() (string, error) {

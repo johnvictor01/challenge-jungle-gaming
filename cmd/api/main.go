@@ -48,8 +48,8 @@ func options(logger *slog.Logger) []fx.Option {
 		fx.Provide(func(store *postgres.Store) *postgres.OutboxDispatcherRepository {
 			return postgres.NewOutboxDispatcherRepository(store)
 		}),
-		fx.Provide(func(repository *postgres.OutboxDispatcherRepository, publisher *sqsadapter.Publisher, config platform.Config) (*application.OutboxDispatcher, error) {
-			return application.NewOutboxDispatcher(repository, publisher, application.OutboxDispatchConfig{Owner: config.WorkerID})
+		fx.Provide(func(repository *postgres.OutboxDispatcherRepository, publisher *sqsadapter.Publisher, config platform.Config, logger *slog.Logger) (*application.OutboxDispatcher, error) {
+			return application.NewOutboxDispatcher(repository, publisher, application.OutboxDispatchConfig{Owner: config.WorkerID, Logger: logger})
 		}),
 		fx.Provide(func(store *postgres.Store, processor *application.ProcessWagerService, client *sqs.Client, config platform.Config) (*sqsadapter.Consumer, error) {
 			if config.SQSInputQueueURL == "" {

@@ -116,12 +116,16 @@ func (c *Consumer) handleBatch(ctx context.Context, messages []types.Message) {
 						observability.Default.Inc("sqs_message_dlq_threshold_reached")
 					}
 					if ctx.Err() == nil {
-						slog.Error("SQS wager message was not completed", "message_id", envelopeMessageID(message.Body), "error", err)
+						logFields := envelopeLogFields(message.Body)
+						logFields = append(logFields, "error", err)
+						slog.Error("SQS wager message was not completed", logFields...)
 						if _, visibilityErr := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 							QueueUrl: aws.String(c.queueURL), ReceiptHandle: message.ReceiptHandle,
 							VisibilityTimeout: retryVisibilityTimeout(message.Attributes["ApproximateReceiveCount"]),
 						}); visibilityErr != nil {
-							slog.Error("could not schedule SQS retry", "message_id", envelopeMessageID(message.Body), "error", visibilityErr)
+							retryFields := envelopeLogFields(message.Body)
+							retryFields = append(retryFields, "error", visibilityErr)
+							slog.Error("could not schedule SQS retry", retryFields...)
 						}
 					}
 					return
@@ -158,6 +162,20 @@ func envelopeMessageID(body *string) string {
 	return envelope.MessageID
 }
 
+func envelopeLogFields(body *string) []any {
+	var envelope wagerEnvelope
+	if body != nil {
+		_ = json.Unmarshal([]byte(*body), &envelope)
+	}
+	return []any{
+		"message_id", envelope.MessageID,
+		"correlation_id", envelope.MessageID,
+		"external_transaction_id", envelope.Data.ExternalTransactionID,
+		"wallet_id", envelope.Data.WalletID,
+		"provider_id", envelope.Data.ProviderID,
+	}
+}
+
 func (c *Consumer) handle(ctx context.Context, message types.Message) error {
 	started := time.Now()
 	defer func() { observability.Default.Observe("sqs_message_processing_latency", time.Since(started)) }()
@@ -183,11 +201,13 @@ func (c *Consumer) handle(ctx context.Context, message types.Message) error {
 		ReferenceExternalTransactionID: envelope.Data.ReferenceExternalTransactionID,
 		CorrelationID:                  envelope.MessageID,
 	}
-	if _, err := c.processor.Execute(ctx, application.InboxWagerCommand{
+	result, err := c.processor.Execute(ctx, application.InboxWagerCommand{
 		ConsumerName: c.consumerName, MessageID: envelope.MessageID, Wager: command,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("process SQS wager %s: %w", envelope.MessageID, err)
 	}
+	slog.Info("SQS wager message completed", "correlation_id", envelope.MessageID, "message_id", envelope.MessageID, "transaction_id", result.Wager.TransactionID, "wallet_id", command.WalletID, "provider_id", command.ProviderID, "status", result.Wager.Status, "duplicate_delivery", result.DuplicateDelivery, "idempotent_replay", result.Wager.IdempotentReplay)
 	if _, err := c.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{QueueUrl: aws.String(c.queueURL), ReceiptHandle: message.ReceiptHandle}); err != nil {
 		return fmt.Errorf("delete processed SQS message %s: %w", envelope.MessageID, err)
 	}
