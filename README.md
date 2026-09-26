@@ -463,4 +463,8 @@ go vet ./...
 
 Documente separadamente como preparar as dependências dos testes e executar integração, múltiplas instâncias e simulações de falha. Se utilizar build tags, informe os comandos correspondentes.
 
+## 16. Implementação atual
+
+A API HTTP, a validação OIDC com Keycloak, os casos de uso e o adapter PostgreSQL estão implementados. Os testes end-to-end passaram com Keycloak 26.2.5 e PostgreSQL 16. Os passos locais e as rotas estão em [docs/api-http-oidc.md](docs/api-http-oidc.md); as explicações por componente estão em [docs/implementacao/README.md](docs/implementacao/README.md). O consumidor SQS, a inbox e o publisher da outbox continuam como próxima etapa, conforme o roteiro em [docs/TODO_TESTES.md](docs/TODO_TESTES.md).
+
 Entregue código formatado com `gofmt` e dependências reproduzíveis.

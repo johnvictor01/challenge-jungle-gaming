@@ -1,14 +1,16 @@
 # Arquitetura inicial
 
-Este documento registra a primeira proposta para o modelo de dados. Ele é um ponto de partida para revisão; as migrations e a implementação ficam para a próxima etapa, depois de validar as decisões de negócio.
+Este documento registra as decisões de arquitetura adotadas até a fase HTTP/OIDC. Domínio, aplicação, migrations, adapter PostgreSQL e API autenticada estão implementados; consumidor SQS e publisher da outbox ficam para a próxima fase.
 
 ## Escopo por etapas
 
-1. Modelar dados e invariantes do domínio.
-2. Definir e criar o schema PostgreSQL com migrations versionadas.
-3. Cobrir domínio e persistência com testes.
-4. Implementar casos de uso e API.
-5. Integrar SQS e Keycloak, ampliar os testes de integração e fechar documentação e demonstração.
+1. [x] Modelar dados e invariantes do domínio.
+2. [x] Definir o schema PostgreSQL com migrations versionadas.
+3. [x] Cobrir domínio e casos de uso com testes unitários.
+4. [x] Implementar os casos de uso de abertura, operação e retomada de referência.
+5. [x] Implementar persistência PostgreSQL e testes de integração básicos.
+6. [x] Implementar API HTTP, validação OIDC, autorização por papel e reconciliação.
+7. [ ] Implementar consumidor SQS, inbox, publisher outbox e testes de recuperação.
 
 ## Proposta de persistência
 
@@ -40,11 +42,11 @@ Uma operação financeira e seus efeitos devem compartilhar uma única transaç�
 
 Em outras palavras, ao aceitar uma aposta, o banco atualiza o saldo e registra a movimentação no ledger no mesmo commit. Se também houver um evento para publicar, o registro desse evento entra nesse commit pela outbox. Um worker publica o evento depois. A outbox não calcula nem aplica a aposta; ela evita perder a notificação após o saldo ter sido confirmado. Se o saldo for insuficiente, a operação é registrada como rejeitada e não há débito nem lançamento financeiro no ledger.
 
-O primeiro desenho usa `SELECT ... FOR UPDATE` na linha da carteira. Isso serializa alterações da mesma carteira no PostgreSQL e deixa carteiras independentes avançarem em paralelo. Restrições e saldo condicional no banco continuam como defesa adicional. A criação de operações e a disputa de idempotência precisam tratar violações de unicidade como caminho normal de replay/conflito.
+O adapter PostgreSQL usa `pgx` com transações `SERIALIZABLE`, `SELECT ... FOR UPDATE` na linha da carteira e até três tentativas em falhas de serialização ou deadlock. Isso serializa alterações da mesma carteira e deixa carteiras independentes avançarem em paralelo. Restrições e o `UPDATE` condicionado pela versão continuam como defesa adicional. A criação de operações e a disputa de idempotência tratam violações de unicidade como caminho normal de replay ou conflito.
 
 `LOSS` não altera saldo, versão nem ledger, mas conclui a operação e gera o evento de operação processada. `OPENING` cria carteira, operação interna e lançamento inicial atomicamente. O ledger não aceita edição ou exclusão por mecanismos do banco.
 
-Uma operação de reversão sem referência disponível fica em `PENDING_REFERENCE`, com tentativas e prazo duráveis. A resolução da referência e a reversão bem-sucedida precisam ser serializadas no banco para impedir duas reversões incompatíveis.
+Uma operação de reversão sem referência disponível fica em `PENDING_REFERENCE`. O caso de uso de retomada grava a próxima tentativa com backoff exponencial e, no limite padrão de dez tentativas, a encerra com `REFERENCE_NOT_FOUND`. A resolução da referência e a reversão bem-sucedida serão serializadas no banco para impedir duas reversões incompatíveis. O schema também impede que `REFUND` ou `ROLLBACK` dupliquem a reversão da mesma referência.
 
 ## Decisões já alinhadas
 
@@ -52,13 +54,13 @@ Uma operação de reversão sem referência disponível fica em `PENDING_REFEREN
 - Um jogador pode ter uma carteira por moeda. A carteira tem seu próprio `wallet_id`, que será referenciado pelas operações.
 - O histórico de idempotência financeira deve ser persistente e sem expiração planejada, conforme a exigência do challenge.
 
-## Pontos para confirmar antes da primeira migration
+## Regras definidas nesta fase
 
-1. **Provedor:** há cadastro/tabela de provedores ou o identificador do provedor autenticado fica diretamente nas transações?
-2. **Resultado de replay:** qual saldo/resposta original deve ser salvo para que um replay receba o resultado da operação original?
-3. **Reversões:** `REFUND` e `ROLLBACK` podem coexistir sobre a mesma operação? Quais combinações são válidas?
-4. **Falhas permanentes:** em quais condições uma falha vira `FAILED`; falhas transitórias precisam continuar retomáveis.
-5. **Inbox:** por quanto tempo guardar os IDs de mensagens SQS já concluídas? Isso é separado da retenção permanente da idempotência financeira.
+1. **Provedor:** o identificador fica na transação e vem do claim assinado `provider_id` do token Keycloak. Um `providerId` enviado no corpo é conferido e nunca define a identidade.
+2. **Replay:** a transação persistida guarda estado, código de falha e saldo resultante; a mesma chave e o mesmo hash retornam esse resultado sem reaplicar o saldo.
+3. **Reversões:** uma referência aceita somente uma reversão processada entre `REFUND` e `ROLLBACK`. Uma nova tentativa é recusada com `REFERENCE_ALREADY_REVERSED`.
+4. **Falhas:** regra de negócio produz `REJECTED`; erros transitórios fazem rollback para permitir retry. `FAILED` fica reservado ao worker quando uma falha permanente for classificada.
+5. **Inbox:** a deduplicação financeira é permanente. A retenção operacional da inbox será definida junto do consumidor SQS, sem afetar o histórico financeiro.
 
 ## Organização inicial do código
 
@@ -75,8 +77,8 @@ migrations/              migrations PostgreSQL versionadas
 deploy/                  Docker Compose e configuração local de serviços
 ```
 
-Essa estrutura é intencionalmente apenas um mapa nesta etapa; os diretórios e componentes serão criados conforme cada parte for implementada.
+Os diretórios estão criados. A composição de dependências fica no Uber Fx em `cmd/api`; regras ficam em `internal/application`; os adaptadores ligam HTTP e PostgreSQL. `go-oidc` valida emissor, assinatura, audiência e validade do access token. Papéis de realm controlam rotas e o claim `provider_id` vincula o client autenticado ao provedor.
 
-## Pendências
+## Próxima fase
 
-Este projeto ainda não tem schema nem migrations. A próxima entrega deve fechar as seis decisões acima, desenhar as constraints/índices e então criar migrations pequenas e reversíveis por responsabilidade.
+Implementar o consumidor SQS com inbox persistente e o publisher da outbox com leases, retry, backoff e recuperação após reinício. Ambos usarão os casos de uso e a mesma transação PostgreSQL.
