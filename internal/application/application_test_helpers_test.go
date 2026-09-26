@@ -15,6 +15,7 @@ type memoryState struct {
 	transactions map[string]*domain.WagerTransaction
 	ledger       []*domain.WalletLedgerEntry
 	events       []OutboxEvent
+	inbox        map[string]InboxMessage
 	failOn       string
 }
 
@@ -22,12 +23,16 @@ func newMemoryState() *memoryState {
 	return &memoryState{
 		wallets:      map[string]*domain.Wallet{},
 		transactions: map[string]*domain.WagerTransaction{},
+		inbox:        map[string]InboxMessage{},
 	}
 }
 
 func cloneMemoryState(source *memoryState) *memoryState {
 	copy := newMemoryState()
 	copy.failOn = source.failOn
+	for key, message := range source.inbox {
+		copy.inbox[key] = message
+	}
 	for id, wallet := range source.wallets {
 		walletCopy := *wallet
 		copy.wallets[id] = &walletCopy
@@ -74,8 +79,28 @@ func (u *memoryUnitOfWork) WithinTransaction(ctx context.Context, callback func(
 		Transactions: memoryTransactionRepository{state: working},
 		Ledger:       memoryLedgerRepository{state: working},
 		Outbox:       memoryOutboxRepository{state: working},
+		Inbox:        memoryInboxRepository{state: working},
 	}
 	if err := callback(repositories); err != nil {
+		return err
+	}
+	u.state = working
+	return nil
+}
+
+func (u *memoryUnitOfWork) WithinInboxTransaction(_ context.Context, consumerName, messageID, payloadHash string, callback func(Repositories, bool) error) error {
+	working := cloneMemoryState(u.state)
+	key := consumerName + ":" + messageID
+	_, duplicate := working.inbox[key]
+	if !duplicate {
+		working.inbox[key] = InboxMessage{ConsumerName: consumerName, MessageID: messageID, PayloadHash: payloadHash, ReceivedAt: time.Now()}
+	}
+	repositories := Repositories{
+		Wallets: memoryWalletRepository{state: working}, Transactions: memoryTransactionRepository{state: working},
+		Ledger: memoryLedgerRepository{state: working}, Outbox: memoryOutboxRepository{state: working},
+		Inbox: memoryInboxRepository{state: working},
+	}
+	if err := callback(repositories, duplicate); err != nil {
 		return err
 	}
 	u.state = working
@@ -259,6 +284,38 @@ func (r memoryLedgerRepository) SummarizeByWallet(_ context.Context, walletID st
 		}
 	}
 	return summary, nil
+}
+
+type memoryInboxRepository struct{ state *memoryState }
+
+func (r memoryInboxRepository) Find(_ context.Context, consumerName, messageID string) (InboxMessage, error) {
+	message, ok := r.state.inbox[consumerName+":"+messageID]
+	if !ok {
+		return InboxMessage{}, ErrNotFound
+	}
+	return message, nil
+}
+func (r memoryInboxRepository) Create(_ context.Context, message InboxMessage) error {
+	key := message.ConsumerName + ":" + message.MessageID
+	if _, exists := r.state.inbox[key]; exists {
+		return ErrPersistenceConflict
+	}
+	r.state.inbox[key] = message
+	return nil
+}
+func (r memoryInboxRepository) Complete(_ context.Context, consumerName, messageID, transactionID string, completedAt time.Time) error {
+	if r.state.failOn == "inbox_complete" {
+		return errors.New("injected inbox completion failure")
+	}
+	key := consumerName + ":" + messageID
+	message, ok := r.state.inbox[key]
+	if !ok {
+		return ErrNotFound
+	}
+	message.CompletedAt = &completedAt
+	message.TransactionID = transactionID
+	r.state.inbox[key] = message
+	return nil
 }
 
 type memoryOutboxRepository struct{ state *memoryState }

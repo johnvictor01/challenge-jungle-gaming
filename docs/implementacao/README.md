@@ -7,7 +7,7 @@ Este diretório reúne as explicações de cada parte do projeto. A ordem acompa
 | [HTTP e Keycloak](../api-http-oidc.md) | Rotas, papéis, claims OIDC e execução local | Implementado; integração end-to-end passa localmente |
 | [Aplicação e domínio](aplicacao.md) | Casos de uso, operações e idempotência | Implementado com testes unitários |
 | [PostgreSQL](postgresql.md) | Unit of Work, locks, repositórios e migrations | Implementado e verificado em PostgreSQL |
-| [SQS, inbox e outbox](sqs-outbox.md) | Publisher e retries da outbox; entrada SQS ainda pendente | Publisher implementado; inbox pendente |
+| [SQS, inbox e outbox](sqs-outbox.md) | Entrada com inbox transacional e publicação da outbox | Implementado; testes com PostgreSQL e LocalStack |
 | [Arquitetura geral](../../ARCHITECTURE.md) | Decisões, restrições e fases | Atualizado por etapa |
 | [Roteiro de testes](../TODO_TESTES.md) | Cobertura realizada e pendências conforme o README | Atualizado |
 

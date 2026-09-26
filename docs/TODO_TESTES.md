@@ -1,6 +1,6 @@
 # Roteiro de implementação e testes
 
-Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP, validação OIDC e publisher da outbox estão implementados. O consumidor SQS com inbox transacional e testes reais de falha/reentrega continuam pendentes.
+Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP, validação OIDC, consumidor SQS com inbox transacional e publisher da outbox estão implementados.
 
 ## 1. Domínio
 
@@ -28,7 +28,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] `ProcessWager`: erro ao gravar outbox reverte as gravações da `UnitOfWork` simulada.
 - [x] `ResolvePendingReference`: tenta novamente em referência ausente, persiste a próxima tentativa e rejeita com `REFERENCE_NOT_FOUND` quando o limite termina.
 - [x] `ResolvePendingReference`: retoma uma operação pendente quando a referência chega, aplicando saldo, ledger e eventos no mesmo fluxo.
-- [x] Hash canônico determinístico; o endpoint HTTP usa o caso de uso compartilhado que calcula o hash. O consumidor SQS também deverá usar esse caso de uso.
+- [x] Hash canônico determinístico compartilhado entre HTTP e SQS.
 - [x] Testar duas apostas simultâneas de `80.00` sobre saldo de `100.00`; uma processa e a outra é rejeitada.
 - [ ] Executar a retomada de referências pendentes em um worker real e testar sua recuperação após reinicialização com PostgreSQL.
 
@@ -40,7 +40,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Testar que ledger não pode ser apagado.
 - [x] Testar aplicação e reversão completa das migrations em banco descartável.
 - [ ] Ampliar testes de constraints de unicidade e integridade do schema.
-- [x] Testar publisher e política de retry da outbox; integração real de concorrência/reentrega segue pendente.
+- [x] Testar publisher, retry, disputa real de claims e ordenação por agregado.
 - [ ] Simular falhas e reinícios e confirmar que saldo e ledger continuam coerentes.
 
 ## 4. HTTP, Keycloak e autorização
@@ -55,16 +55,16 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Validar token e claim `provider_id` reais, rejeitando assinatura adulterada.
 - [x] Testar abrir carteira com client interno, processar aposta com token de provedor, consultar saldo, ledger, reconciliação e transação.
 - [ ] Testar tokens expirados contra Keycloak real.
-- [ ] Compartilhar o caso de uso e a idempotência com o consumidor SQS.
+- [x] Compartilhar o caso de uso e a idempotência com o consumidor SQS.
 - [ ] Adicionar métricas de resultados, latência e divergência de reconciliação.
 
 ## 5. SQS, inbox e outbox
 
-- [ ] Implementar consumidor SQS que grava inbox e efeitos financeiros na mesma transação SQL.
+- [x] Implementar consumidor SQS que grava inbox e efeitos financeiros na mesma transação SQL.
 - [x] Implementar publisher da outbox com reivindicação segura por múltiplas instâncias, backoff e recuperação de leases.
-- [ ] Testar reentrega, retry, DLQ e interrupção entre commit e remoção da mensagem.
-- [ ] Testar interrupção entre publicação e confirmação da outbox; republicações preservam o mesmo `eventId`.
-- [ ] Testar encerramento seguro e recuperação após reinício.
+- [x] Testar reentrega, retry, DLQ e interrupção entre commit e remoção da mensagem.
+- [x] Testar interrupção entre publicação e confirmação da outbox; republicações preservam o mesmo `eventId`.
+- [x] Testar encerramento seguro e recuperação após reinício.
 
 ## 6. Concorrência e recuperação
 
@@ -78,7 +78,6 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 
 ## Próxima sequência de trabalho
 
-1. Implementar inbox no mesmo `UnitOfWork` do tratamento SQS.
-2. Provar com LocalStack a disputa de claims concorrentes, recovery de lease e interrupção entre `SendMessage` e confirmação.
-3. Provar recuperação, DLQ e consistência com várias instâncias.
-4. Adicionar métricas e completar documentação de execução e demonstração.
+1. Na etapa 6, cobrir a disputa de idempotência com 50 envios paralelos e concorrência com três instâncias.
+2. Adicionar métricas e readiness que também consulte SQS.
+3. Completar a documentação de execução e preparar a demonstração.

@@ -58,6 +58,7 @@ func (s *Store) WithinTransaction(ctx context.Context, callback func(application
 			Transactions: transactionRepository{tx: tx},
 			Ledger:       ledgerRepository{tx: tx},
 			Outbox:       outboxRepository{tx: tx},
+			Inbox:        inboxRepository{tx: tx},
 		}
 		err = callback(repositories)
 		if err != nil {
@@ -77,6 +78,49 @@ func (s *Store) WithinTransaction(ctx context.Context, callback func(application
 		}
 	}
 	return errors.New("unreachable postgres transaction retry")
+}
+
+func (s *Store) WithinInboxTransaction(ctx context.Context, consumerName, messageID, payloadHash string, callback func(application.Repositories, bool) error) error {
+	if s == nil || s.pool == nil {
+		return errors.New("postgres store is not configured")
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+		if err != nil {
+			return fmt.Errorf("begin inbox transaction: %w", err)
+		}
+		result, err := tx.Exec(ctx, `INSERT INTO inbox_messages (consumer_name, message_id, payload_hash)
+			VALUES ($1,$2,$3) ON CONFLICT (consumer_name, message_id) DO NOTHING`, consumerName, messageID, payloadHash)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			if isRetryableTransactionError(err) && attempt < 2 {
+				continue
+			}
+			return mapError(err)
+		}
+		duplicate := result.RowsAffected() == 0
+		repositories := application.Repositories{
+			Wallets: walletRepository{tx: tx}, Transactions: transactionRepository{tx: tx},
+			Ledger: ledgerRepository{tx: tx}, Outbox: outboxRepository{tx: tx},
+			Inbox: inboxRepository{tx: tx},
+		}
+		if err := callback(repositories, duplicate); err != nil {
+			_ = tx.Rollback(ctx)
+			if isRetryableTransactionError(err) && attempt < 2 {
+				continue
+			}
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			_ = tx.Rollback(ctx)
+			if isRetryableTransactionError(err) && attempt < 2 {
+				continue
+			}
+			return mapError(err)
+		}
+		return nil
+	}
+	return errors.New("inbox transaction retry limit reached")
 }
 
 func mapError(err error) error {

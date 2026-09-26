@@ -322,7 +322,7 @@ Liveness do processo e readiness de PostgreSQL e SQS.
 
 ## 10. Consumidor SQS
 
-Provisione as filas `wager-transactions.fifo` e `wager-transactions-dlq.fifo`, incluindo a configuração de redrive.
+O consumidor usa `wager-transactions.fifo`, visibility timeout de 60 segundos e redrive para `wager-transactions-dlq.fifo` após cinco recebimentos. O ambiente local provisiona essas filas junto com a fila de eventos.
 
 Exemplo de corpo de mensagem:
 
@@ -348,6 +348,7 @@ Exemplo de corpo de mensagem:
 HTTP e SQS devem compartilhar o caso de uso e as garantias de idempotência financeira. Na entrada por SQS, a chave é `data.idempotencyKey`, com deduplicação adicional pela inbox.
 
 - Use o `messageId` do envelope como identidade durável da mensagem para o consumidor e verifique seu hash em reentregas.
+- Ao publicar, use o `walletId` como `MessageGroupId` para ordenar operações da mesma carteira e o `messageId` estável como `MessageDeduplicationId`. A janela de deduplicação FIFO do SQS é apenas uma otimização; a inbox e a idempotência financeira persistentes garantem a correção.
 - Remova a mensagem da fila somente após o commit do seu tratamento durável.
 - Rejeições de negócio confirmadas são terminais e permitem a remoção da mensagem.
 - Falhas transitórias exigem retry com backoff; erros permanentes ou tentativas esgotadas devem chegar à DLQ.
@@ -465,6 +466,6 @@ Documente separadamente como preparar as dependências dos testes e executar int
 
 ## 16. Implementação atual
 
-A API HTTP, a validação OIDC com Keycloak, os casos de uso, o adapter PostgreSQL e o publisher SQS da outbox estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. O consumidor SQS e a inbox transacional ainda precisam ser concluídos. Os passos locais estão em [docs/api-http-oidc.md](docs/api-http-oidc.md) e [docs/implementacao/README.md](docs/implementacao/README.md).
+A API HTTP, a validação OIDC com Keycloak, os casos de uso, o adapter PostgreSQL, o consumidor SQS com inbox transacional e o publisher da outbox estão implementados. O publisher usa entrega at-least-once, `eventId` estável, lease concorrente e retry persistido. Os passos locais e os pontos que ainda faltam, como métricas e readiness combinada, estão em [docs/api-http-oidc.md](docs/api-http-oidc.md) e [docs/implementacao/README.md](docs/implementacao/README.md).
 
 Entregue código formatado com `gofmt` e dependências reproduzíveis.

@@ -1,10 +1,10 @@
 # SQS, inbox e outbox
 
-O publisher da outbox e o provisionamento local do SQS estão implementados. A entrada SQS com inbox transacional continua pendente. Os eventos saem do banco depois do commit que os criou; publicação repetida mantém o mesmo `eventId`.
+O consumidor SQS com inbox transacional, o publisher da outbox e o provisionamento local estão implementados. Eventos saem do banco depois do commit que os criou; publicação repetida mantém o mesmo `eventId`.
 
-## Entrada pela inbox
+## Entrada pela inbox — implementado
 
-O consumidor deve validar envelope e payload, usar `data.idempotencyKey` e gerar o mesmo hash canônico do endpoint HTTP. A identidade durável da entrega é `(consumer_name, message_id)`. Inbox, operação, saldo, ledger e eventos correspondentes precisam ser confirmados no mesmo `UnitOfWork`. Só remover a mensagem SQS depois do commit. Rejeições de negócio persistidas são terminais; falhas transitórias devem permitir retry.
+O consumidor valida envelope e payload, usa `data.idempotencyKey` e calcula o mesmo hash canônico do endpoint HTTP. A identidade durável da entrega é `(consumer_name, message_id)`. A inserção da inbox, a operação, o saldo, o ledger e os eventos são confirmados na mesma `UnitOfWork`. Só remove a mensagem SQS depois do commit. Rejeições de negócio persistidas são terminais; falhas de processamento deixam a mensagem na fila e ajustam a visibilidade com backoff exponencial de 1 a 60 segundos.
 
 ## Publicação pela outbox — implementado
 
@@ -12,13 +12,9 @@ O publisher reivindica eventos em lotes com `FOR UPDATE SKIP LOCKED` e lease de 
 
 Cada grupo FIFO usa o `aggregateId` como `MessageGroupId`, para que eventos da mesma carteira mantenham ordem e carteiras diferentes avancem em paralelo. O `eventId` vira `MessageDeduplicationId`.
 
-## Entrada pela inbox — pendente
-
-O consumidor deve validar envelope e payload, usar `data.idempotencyKey` e gerar o mesmo hash canônico do endpoint HTTP. A identidade durável da entrega é `(consumer_name, message_id)`. Inbox, operação, saldo, ledger e eventos correspondentes precisam ser confirmados no mesmo `UnitOfWork`. Só remover a mensagem SQS depois do commit. Rejeições de negócio persistidas são terminais; falhas transitórias devem permitir retry.
-
 ## Encerramento e recuperação
 
-Em `SIGTERM`, parar novas leituras e concluir ou liberar o trabalho em andamento. Testar queda depois do commit antes do delete da mensagem, queda depois da publicação antes da confirmação, retomada por outra instância e duas instâncias concorrentes.
+Em `SIGTERM`, o consumer cancela long polling e espera o lote em andamento terminar; trabalho não confirmado permanece no SQS para reentrega depois do visibility timeout. O worker de outbox também encerra com o contexto do Fx. Testes cobrem redelivery depois de falha no delete, retomada por um novo serviço e republicação com o mesmo ID após falha de confirmação.
 
 ## Subir o SQS local
 
@@ -26,13 +22,26 @@ Em `SIGTERM`, parar novas leituras e concluir ou liberar o trabalho em andamento
 docker compose -f deploy/sqs.compose.yaml up -d
 ```
 
-O serviço `create-queues` cria a fila FIFO `wager-events.fifo`. Configure `SQS_ENDPOINT=http://localhost:4566` e use a URL `http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/wager-events.fifo` no `SQS_QUEUE_URL`. As credenciais `test/test` são somente para o LocalStack.
+O serviço `create-queues` cria as filas `wager-events.fifo`, `wager-transactions.fifo` e `wager-transactions-dlq.fifo`, com redrive após cinco recebimentos e visibility timeout de 60 segundos na fila de entrada. Configure `SQS_ENDPOINT=http://localhost:4566`, `SQS_QUEUE_URL` para a fila de eventos e `SQS_INPUT_QUEUE_URL` para a fila de entrada. As credenciais `test/test` são somente para o LocalStack.
+
+Para executar a integração local completa, copie `.env.example` para `.env`, inicie Postgres, Keycloak e LocalStack com seus Compose em `deploy/`, aplique as migrations, exporte as variáveis com `set -a; source .env; set +a` e rode `go run ./cmd/api`. A API inicia os workers de entrada e saída junto do servidor HTTP.
+
+Com os containers ativos e `.env` exportado, execute os testes integrados:
+
+```sh
+TEST_DATABASE_URL="$DATABASE_URL" \
+TEST_SQS_ENDPOINT="$SQS_ENDPOINT" \
+TEST_SQS_INPUT_QUEUE_URL="$SQS_INPUT_QUEUE_URL" \
+TEST_SQS_DLQ_URL="$TEST_SQS_DLQ_URL" \
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
+go test -race ./internal/adapters/postgres ./internal/adapters/sqs -count=1
+```
 
 ## Pendências de implementação
 
 - [x] Publisher SQS com LocalStack e fila FIFO provisionada localmente.
-- [ ] Repositório inbox e integração no `UnitOfWork`.
+- [x] Repositório inbox e integração no `UnitOfWork`.
 - [x] Reivindicação concorrente, lease, backoff e confirmação da outbox.
-- [ ] Política e configuração de DLQ/visibility timeout.
+- [x] Política local de DLQ e visibility timeout.
 - [x] Provisionamento automático da fila local.
-- [ ] Testes reais de reentrega, interrupção, recuperação e concorrência.
+- [x] Testes reais de reentrega, interrupção, recuperação, claims concorrentes e DLQ.

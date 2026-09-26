@@ -10,7 +10,7 @@ Este documento registra as decisões de arquitetura adotadas até a fase HTTP/OI
 4. [x] Implementar os casos de uso de abertura, operação e retomada de referência.
 5. [x] Implementar persistência PostgreSQL e testes de integração básicos.
 6. [x] Implementar API HTTP, validação OIDC, autorização por papel e reconciliação.
-7. [ ] Implementar consumidor SQS, inbox, publisher outbox e testes de recuperação.
+7. [x] Implementar consumidor SQS, inbox, publisher outbox e testes de recuperação.
 
 ## Proposta de persistência
 
@@ -61,6 +61,8 @@ Uma operação de reversão sem referência disponível fica em `PENDING_REFEREN
 3. **Reversões:** uma referência aceita somente uma reversão processada entre `REFUND` e `ROLLBACK`. Uma nova tentativa é recusada com `REFERENCE_ALREADY_REVERSED`.
 4. **Falhas:** regra de negócio produz `REJECTED`; erros transitórios fazem rollback para permitir retry. `FAILED` fica reservado ao worker quando uma falha permanente for classificada.
 5. **Inbox:** a deduplicação financeira é permanente. A retenção operacional da inbox será definida junto do consumidor SQS, sem afetar o histórico financeiro.
+6. **SQS:** a inbox usa `(consumer_name, message_id)` e é confirmada junto dos efeitos financeiros. O `messageId` do envelope é a identidade estável da entrega; `data.idempotencyKey` continua sendo a chave financeira comum com HTTP.
+7. **Publicação:** cada mensagem de entrada só é removida depois do commit SQL. Falhas de processamento deixam a mensagem para reentrega e redrive após cinco recebimentos. O publisher usa leases no PostgreSQL; eventos do mesmo agregado são publicados em ordem e o `eventId` é mantido em retries.
 
 ## Organização inicial do código
 
@@ -81,4 +83,4 @@ Os diretórios estão criados. A composição de dependências fica no Uber Fx e
 
 ## Próxima fase
 
-Implementar o consumidor SQS com inbox persistente e o publisher da outbox com leases, retry, backoff e recuperação após reinício. Ambos usarão os casos de uso e a mesma transação PostgreSQL.
+A seção 5 do `docs/TODO_TESTES.md` está concluída. A próxima etapa é a seção 6: provar idempotência com 50 requisições paralelas, rodar cenários com três instâncias independentes, adicionar métricas e readiness que consulte também o SQS.

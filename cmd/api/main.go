@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/fx"
 
 	httpadapter "github.com/johnvictor01/challenge-jungle-gaming/internal/adapters/http"
@@ -20,6 +21,7 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
 	fx.New(options(logger)...).Run()
 }
 
@@ -35,31 +37,69 @@ func options(logger *slog.Logger) []fx.Option {
 		fx.Provide(func(service *application.ProcessWagerService) httpadapter.WagerProcessor { return service }),
 		fx.Provide(func(service *application.QueryService) httpadapter.DataQueries { return service }),
 		fx.Provide(newOIDCAuthenticator),
-		fx.Provide(newSQSPublisher),
+		fx.Provide(newSQSClient, newSQSPublisher),
 		fx.Provide(func(store *postgres.Store) *postgres.OutboxDispatcherRepository {
 			return postgres.NewOutboxDispatcherRepository(store)
 		}),
 		fx.Provide(func(repository *postgres.OutboxDispatcherRepository, publisher *sqsadapter.Publisher, config platform.Config) (*application.OutboxDispatcher, error) {
 			return application.NewOutboxDispatcher(repository, publisher, application.OutboxDispatchConfig{Owner: config.WorkerID})
 		}),
+		fx.Provide(func(store *postgres.Store, processor *application.ProcessWagerService, client *sqs.Client, config platform.Config) (*sqsadapter.Consumer, error) {
+			if config.SQSInputQueueURL == "" {
+				return nil, errors.New("SQS_INPUT_QUEUE_URL is required")
+			}
+			inboxProcessor := application.NewProcessInboxWagerService(store, processor)
+			return sqsadapter.NewConsumer(client, inboxProcessor, config.SQSInputQueueURL, "wager-api")
+		}),
+		fx.Provide(func(consumer *sqsadapter.Consumer) platform.SQSConsumer { return consumer }),
 		fx.Provide(platform.NewOutboxWorker),
+		fx.Provide(platform.NewSQSConsumerWorker),
 		fx.Provide(func(auth *httpadapter.OIDCAuthenticator) httpadapter.TokenAuthenticator { return auth }),
 		fx.Provide(func(store *postgres.Store) httpadapter.ReadinessChecker { return store }),
 		fx.Provide(httpadapter.NewHandler),
 		fx.Invoke(registerHTTPServer),
 		fx.Invoke(registerOutboxWorker),
+		fx.Invoke(registerSQSConsumerWorker),
 	}
 }
 
-func newSQSPublisher(config platform.Config) (*sqsadapter.Publisher, error) {
-	if config.SQSQueueURL == "" {
-		return nil, errors.New("SQS_QUEUE_URL is required")
-	}
+func registerSQSConsumerWorker(lifecycle fx.Lifecycle, worker *platform.SQSConsumerWorker, logger *slog.Logger) {
+	var cancel context.CancelFunc
+	var done chan struct{}
+	lifecycle.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			ctx, stop := context.WithCancel(context.Background())
+			cancel, done = stop, make(chan struct{})
+			go func() { defer close(done); worker.Run(ctx) }()
+			logger.Info("SQS consumer started")
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if cancel != nil {
+				cancel()
+			}
+			if done == nil {
+				return nil
+			}
+			select {
+			case <-done:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	})
+}
+
+func newSQSClient(config platform.Config) (*sqs.Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := sqsadapter.NewAWSClient(ctx, config.SQSRegion, config.SQSEndpoint)
-	if err != nil {
-		return nil, err
+	return sqsadapter.NewAWSClient(ctx, config.SQSRegion, config.SQSEndpoint)
+}
+
+func newSQSPublisher(client *sqs.Client, config platform.Config) (*sqsadapter.Publisher, error) {
+	if config.SQSQueueURL == "" {
+		return nil, errors.New("SQS_QUEUE_URL is required")
 	}
 	return sqsadapter.NewPublisher(client, config.SQSQueueURL, config.SQSGroupID)
 }

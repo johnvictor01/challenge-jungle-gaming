@@ -205,3 +205,120 @@ func TestPostgresStoreSerializesConcurrentDebits(t *testing.T) {
 		t.Errorf("balance = %d, want 2000", balance)
 	}
 }
+
+func TestPostgresOutboxClaimsAreExclusiveAndPreserveAggregateOrder(t *testing.T) {
+	store := integrationStore(t)
+	// Keep records left by earlier manual integration runs out of this test's
+	// eligible range, then restore their schedule when the test finishes.
+	type previousSchedule struct {
+		id    string
+		next  time.Time
+		owner *string
+		until *time.Time
+	}
+	rows, err := store.pool.Query(context.Background(), "SELECT event_id, next_attempt_at, lease_owner, lease_until FROM outbox_events WHERE published_at IS NULL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous []previousSchedule
+	for rows.Next() {
+		var item previousSchedule
+		if err := rows.Scan(&item.id, &item.next, &item.owner, &item.until); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		previous = append(previous, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+	for _, item := range previous {
+		if _, err := store.pool.Exec(context.Background(), "UPDATE outbox_events SET next_attempt_at = now() + interval '1 day', lease_owner = NULL, lease_until = NULL WHERE event_id = $1", item.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, item := range previous {
+			_, _ = store.pool.Exec(context.Background(), "UPDATE outbox_events SET next_attempt_at=$2, lease_owner=$3, lease_until=$4 WHERE event_id=$1 AND published_at IS NULL", item.id, item.next, item.owner, item.until)
+		}
+	})
+	ids := application.UUIDGenerator{}
+	open := application.NewOpenWalletService(store, ids)
+	firstWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 1_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWallet, err := open.Execute(context.Background(), application.OpenWalletCommand{PlayerID: integrationPlayerID(t), InitialBalance: domain.Money{Units: 2_000, Currency: "BRL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := NewOutboxDispatcherRepository(store)
+	firstClaim, err := repository.Claim(context.Background(), "publisher-a", 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondClaim, err := repository.Claim(context.Background(), "publisher-b", 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, event := range firstClaim {
+		seen[event.EventID] = true
+	}
+	for _, event := range secondClaim {
+		if seen[event.EventID] {
+			t.Fatalf("event %s was claimed by two publishers", event.EventID)
+		}
+		seen[event.EventID] = true
+	}
+	if len(firstClaim) != 1 || len(secondClaim) != 1 {
+		t.Fatalf("claims=%d/%d, expected each publisher to claim one independent aggregate", len(firstClaim), len(secondClaim))
+	}
+	if firstClaim[0].AggregateID == secondClaim[0].AggregateID {
+		t.Fatal("publishers claimed two ordered events from the same wallet instead of parallel wallet aggregates")
+	}
+	claimedAggregate := map[string]bool{firstClaim[0].AggregateID: true, secondClaim[0].AggregateID: true}
+	if !claimedAggregate[firstWallet.Wallet.ID] || !claimedAggregate[secondWallet.Wallet.ID] {
+		t.Fatal("independent wallet aggregates were not processed in parallel")
+	}
+	blocked, err := repository.Claim(context.Background(), "publisher-c", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocked) != 0 {
+		t.Fatalf("later event overtook an unconfirmed aggregate head: %+v", blocked)
+	}
+	for _, event := range append(firstClaim, secondClaim...) {
+		if err := repository.MarkPublished(context.Background(), event.EventID, eventOwner(event, firstClaim, secondClaim, "publisher-a", "publisher-b"), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	following, err := repository.Claim(context.Background(), "publisher-c", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(following) != 2 {
+		t.Fatalf("following claim=%d events, want next event for each wallet", len(following))
+	}
+	for _, event := range following {
+		if err := repository.MarkPublished(context.Background(), event.EventID, "publisher-c", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func eventOwner(event application.OutboxEvent, first, second []application.OutboxEvent, firstOwner, secondOwner string) string {
+	for _, candidate := range first {
+		if candidate.EventID == event.EventID {
+			return firstOwner
+		}
+	}
+	for _, candidate := range second {
+		if candidate.EventID == event.EventID {
+			return secondOwner
+		}
+	}
+	return ""
+}

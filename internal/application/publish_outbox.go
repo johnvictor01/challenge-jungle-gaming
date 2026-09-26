@@ -75,7 +75,7 @@ func (d *OutboxDispatcher) DispatchBatch(ctx context.Context) (int, error) {
 	}
 	for _, event := range events {
 		if err := d.publisher.Publish(ctx, event); err != nil {
-			next := d.config.Now().Add(d.config.RetryDelay(event.Attempts + 1))
+			next := d.config.Now().Add(d.config.RetryDelay(event.Attempts))
 			if scheduleErr := d.repository.ScheduleRetry(ctx, event.EventID, d.config.Owner, next, err.Error()); scheduleErr != nil {
 				return len(events), errors.Join(fmt.Errorf("publish outbox event %s: %w", event.EventID, err), fmt.Errorf("schedule retry: %w", scheduleErr))
 			}
