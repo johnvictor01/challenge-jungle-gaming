@@ -44,7 +44,9 @@ Ordem atual:
 3. `000003`: ledger append-only.
 4. `000004`: inbox de mensagens SQS.
 5. `000005`: outbox de eventos.
+6. `000006`: reserva única de referência apenas para reversões pendentes ou processadas; reversões rejeitadas permanecem no histórico sem bloquear uma tentativa válida.
+7. `000007`: índice parcial para o worker localizar referências pendentes vencidas.
 
 Se a carteira for aberta com saldo inicial maior que zero, a aplicação deve inserir a carteira, a operação `OPENING`, o lançamento de crédito no ledger e os eventos correspondentes na mesma transação SQL. Conforme o README do challenge, saldo inicial zero não cria operação `OPENING`, lançamento no ledger nem eventos financeiros.
 
-O banco impede mais de uma reversão (`REFUND` ou `ROLLBACK`) para a mesma operação de origem. Uma reversão resolvida precisa apontar para uma operação processada compatível, na mesma carteira e rodada, e usar o mesmo valor. A política permite reverter um `REFUND` com `ROLLBACK`, conforme o tipo de referência aceito pelo README.
+O banco impede mais de uma reversão ativa (`PENDING`, `PENDING_REFERENCE` ou `PROCESSED`) para a mesma operação de origem. Reversões rejeitadas permanecem auditáveis e não bloqueiam uma nova tentativa. Uma reversão resolvida precisa apontar para uma operação processada compatível, na mesma carteira e rodada, e usar o mesmo valor. A política permite reverter um `REFUND` com `ROLLBACK`, conforme o tipo de referência aceito pelo README.

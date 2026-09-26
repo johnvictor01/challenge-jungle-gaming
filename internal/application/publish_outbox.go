@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/observability"
 )
 
 var ErrOutboxLeaseLost = errors.New("outbox lease is no longer owned")
@@ -74,7 +76,13 @@ func (d *OutboxDispatcher) DispatchBatch(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("claim outbox events: %w", err)
 	}
 	for _, event := range events {
+		lag := d.config.Now().Sub(event.OccurredAt)
+		if lag < 0 {
+			lag = 0
+		}
+		observability.Default.Observe("outbox_event_lag", lag)
 		if err := d.publisher.Publish(ctx, event); err != nil {
+			observability.Default.Inc("outbox_publish_retry")
 			next := d.config.Now().Add(d.config.RetryDelay(event.Attempts))
 			if scheduleErr := d.repository.ScheduleRetry(ctx, event.EventID, d.config.Owner, next, err.Error()); scheduleErr != nil {
 				return len(events), errors.Join(fmt.Errorf("publish outbox event %s: %w", event.EventID, err), fmt.Errorf("schedule retry: %w", scheduleErr))
@@ -84,6 +92,7 @@ func (d *OutboxDispatcher) DispatchBatch(ctx context.Context) (int, error) {
 		if err := d.repository.MarkPublished(ctx, event.EventID, d.config.Owner, d.config.Now()); err != nil {
 			return len(events), fmt.Errorf("mark outbox event %s published: %w", event.EventID, err)
 		}
+		observability.Default.Inc("outbox_event_published")
 	}
 	return len(events), nil
 }

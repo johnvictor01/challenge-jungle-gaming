@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/observability"
 )
 
 var ErrInvalidCursor = errors.New("invalid ledger cursor")
@@ -115,6 +116,8 @@ func (s *QueryService) Ledger(ctx context.Context, walletID, cursor string, limi
 }
 
 func (s *QueryService) Reconcile(ctx context.Context, walletID string) (Reconciliation, error) {
+	started := time.Now()
+	defer func() { observability.Default.Observe("reconciliation_latency", time.Since(started)) }()
 	var result Reconciliation
 	err := s.uow.WithinTransaction(ctx, func(repositories Repositories) error {
 		wallet, err := repositories.Wallets.FindByID(ctx, walletID)
@@ -136,5 +139,8 @@ func (s *QueryService) Reconcile(ctx context.Context, walletID string) (Reconcil
 		result = Reconciliation{WalletID: wallet.ID, StoredBalance: wallet.Balance, CalculatedBalance: calculated, Difference: difference, Consistent: difference.Units == 0, CheckedEntries: summary.Count}
 		return nil
 	})
+	if err == nil && !result.Consistent {
+		observability.Default.Inc("reconciliation_divergence")
+	}
 	return result, err
 }

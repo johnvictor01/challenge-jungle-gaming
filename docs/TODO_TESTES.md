@@ -1,6 +1,6 @@
 # Roteiro de implementação e testes
 
-Este arquivo acompanha os requisitos do `README.md` e mostra o que já está coberto e o que depende das próximas partes do sistema. Domínio, aplicação, PostgreSQL, API HTTP, validação OIDC, consumidor SQS com inbox transacional e publisher da outbox estão implementados.
+Este arquivo acompanha os requisitos do `README.md` e registra o que foi implementado e verificado. Domínio, aplicação, PostgreSQL, API HTTP, validação OIDC, workers de referência e outbox, consumidor SQS com inbox transacional, métricas e readiness estão implementados.
 
 ## 1. Domínio
 
@@ -9,7 +9,7 @@ Este arquivo acompanha os requisitos do `README.md` e mostra o que já está cob
 - [x] `WagerTransaction`: tipos, valores, referências e mudanças de estado permitidas.
 - [x] `OPENING`: operação interna processada para uma carteira com saldo inicial positivo.
 - [x] `WalletLedgerEntry`: direção, valor, moeda, saldos antes/depois, overflow, IDs e reidratação.
-- [ ] Ampliar a cobertura de combinações entre referências, `REFUND` e `ROLLBACK` nos testes PostgreSQL concorrentes.
+- [x] Cobrir referências tardias, `REFUND`/`ROLLBACK` concorrentes, rejeição por referência já revertida e nova tentativa após uma reversão rejeitada nos testes PostgreSQL.
 
 ## 2. Casos de uso
 
@@ -39,7 +39,7 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Testar atomicidade de saldo, operação, ledger e outbox no fluxo de aposta.
 - [x] Testar que ledger não pode ser apagado.
 - [x] Testar aplicação e reversão completa das migrations em banco descartável.
-- [ ] Ampliar testes de constraints de unicidade e integridade do schema.
+- [x] Testar diretamente constraints de carteira por jogador/moeda e unicidade de idempotência, além dos fluxos de reversão.
 - [x] Testar publisher, retry, disputa real de claims e ordenação por agregado.
 - [x] Simular parada e reinício do serviço durante referência pendente e confirmar que saldo e ledger continuam coerentes.
 
@@ -54,9 +54,9 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Importar o realm local em Keycloak 26.2.5 e obter token client credentials.
 - [x] Validar token e claim `provider_id` reais, rejeitando assinatura adulterada.
 - [x] Testar abrir carteira com client interno, processar aposta com token de provedor, consultar saldo, ledger, reconciliação e transação.
-- [ ] Testar tokens expirados contra Keycloak real.
+- [x] Testar token expirado emitido pelo Keycloak real e confirmar `401` em rota protegida; o teste restaura a validade original do realm.
 - [x] Compartilhar o caso de uso e a idempotência com o consumidor SQS.
-- [ ] Adicionar métricas de resultados, latência e divergência de reconciliação.
+- [x] Expor métricas de resultados por status, replay, conflitos, retries SQS, candidatos ao redrive, atraso/publicação da outbox, latência e divergência da reconciliação em `/metrics`.
 
 ## 5. SQS, inbox e outbox
 
@@ -76,8 +76,13 @@ Os testes executáveis usam repositórios em memória para testar as regras e a 
 - [x] Conferir saldo contra créditos menos débitos do ledger nos cenários concorrentes e de retomada.
 - [x] Executar `go test -race ./...` e os testes PostgreSQL de integração com dependência real.
 
-## Próxima sequência de trabalho
+## 7. Readiness, observabilidade e demonstração
 
-1. Na etapa 6, ampliar as combinações concorrentes entre referências, `REFUND` e `ROLLBACK` e revisar constraints de integridade do schema.
-2. Adicionar métricas e readiness que também consulte SQS.
-3. Completar a documentação de execução e preparar a demonstração.
+- [x] Fazer `/health/ready` consultar PostgreSQL, fila de entrada SQS e fila de eventos SQS.
+- [x] Expor e testar `/metrics` com contadores e observações de latência.
+- [x] Documentar como iniciar a stack, executar os fluxos principais e apresentar os testes de concorrência/recuperação em `docs/demo.md`.
+- [x] Executar `go test -race ./...`, integrações PostgreSQL/LocalStack e token expirado contra Keycloak real.
+
+## Conclusão
+
+As etapas e tarefas de implementação listadas neste roteiro estão concluídas. A gravação do vídeo e a apresentação do challenge ficam para execução manual seguindo `docs/demo.md`.

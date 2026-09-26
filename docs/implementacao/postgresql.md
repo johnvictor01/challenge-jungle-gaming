@@ -16,4 +16,4 @@ As migrations em `migrations/` são versionadas e têm arquivos de subida e reve
 
 ## Verificações atuais
 
-Os testes em `schema_integration_test.go` cobrem abertura e aposta atômicas, saldo e versão, ledger, outbox, replay, reconciliação, paginação, carteira única por jogador/moeda, isolamento de provedor e disputa de duas apostas de `80.00` sobre saldo de `100.00`.
+Os testes em `schema_integration_test.go` cobrem abertura e aposta atômicas, saldo e versão, ledger, outbox, replay, reconciliação, paginação, constraints de unicidade, carteira única por jogador/moeda, isolamento de provedor, reversões concorrentes, 50 replays em três processos e recuperação de referência pendente após reinício.

@@ -88,6 +88,16 @@ func TestHandlerRequiresValidTokenAndRole(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointIsPublic(t *testing.T) {
+	handler := testHandler(testPrincipal("provider-a", "wager:write"), &fakeProcessor{})
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("metrics status/content-type=%d/%q", response.Code, response.Header().Get("Content-Type"))
+	}
+}
+
 func TestHandlerRejectsSpoofedProviderID(t *testing.T) {
 	processor := &fakeProcessor{}
 	handler := testHandler(testPrincipal("provider-a", "wager:write"), processor)

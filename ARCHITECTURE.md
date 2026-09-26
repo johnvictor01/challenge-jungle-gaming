@@ -46,7 +46,7 @@ O adapter PostgreSQL usa `pgx` com transações `SERIALIZABLE`, `SELECT ... FOR 
 
 `LOSS` não altera saldo, versão nem ledger, mas conclui a operação e gera o evento de operação processada. `OPENING` cria carteira, operação interna e lançamento inicial atomicamente. O ledger não aceita edição ou exclusão por mecanismos do banco.
 
-Uma operação de reversão sem referência disponível fica em `PENDING_REFERENCE`. O caso de uso de retomada grava a próxima tentativa com backoff exponencial e, no limite padrão de dez tentativas, a encerra com `REFERENCE_NOT_FOUND`. A resolução da referência e a reversão bem-sucedida serão serializadas no banco para impedir duas reversões incompatíveis. O schema também impede que `REFUND` ou `ROLLBACK` dupliquem a reversão da mesma referência.
+Uma operação de reversão sem referência disponível fica em `PENDING_REFERENCE`. O worker lê pendências vencidas diretamente do PostgreSQL e o caso de uso de retomada grava a próxima tentativa com backoff exponencial; no limite padrão de dez tentativas, encerra com `REFERENCE_NOT_FOUND`. A resolução da referência e a reversão bem-sucedida são serializadas no banco para impedir duas reversões incompatíveis. O schema reserva a referência para reversões pendentes ou processadas; rejeitadas permanecem no histórico sem impedir nova tentativa.
 
 ## Decisões já alinhadas
 
@@ -81,6 +81,6 @@ deploy/                  Docker Compose e configuração local de serviços
 
 Os diretórios estão criados. A composição de dependências fica no Uber Fx em `cmd/api`; regras ficam em `internal/application`; os adaptadores ligam HTTP e PostgreSQL. `go-oidc` valida emissor, assinatura, audiência e validade do access token. Papéis de realm controlam rotas e o claim `provider_id` vincula o client autenticado ao provedor.
 
-## Próxima fase
+## Estado atual
 
-A seção 5 do `docs/TODO_TESTES.md` está concluída. A próxima etapa é a seção 6: provar idempotência com 50 requisições paralelas, rodar cenários com três instâncias independentes, adicionar métricas e readiness que consulte também o SQS.
+As etapas previstas no `docs/TODO_TESTES.md` estão implementadas e verificadas. O roteiro de execução da demonstração está em `docs/demo.md`.

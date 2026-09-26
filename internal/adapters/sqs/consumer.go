@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/application"
 	"github.com/johnvictor01/challenge-jungle-gaming/internal/domain"
+	"github.com/johnvictor01/challenge-jungle-gaming/internal/observability"
 )
 
 type ReceiveDeleteAPI interface {
@@ -80,6 +81,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			},
 		})
 		if err != nil {
+			observability.Default.Inc("sqs_receive_error")
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -109,6 +111,10 @@ func (c *Consumer) handleBatch(ctx context.Context, messages []types.Message) {
 					return
 				}
 				if err := c.handle(ctx, message); err != nil {
+					observability.Default.Inc("sqs_message_retry")
+					if receiveCount, parseErr := strconv.Atoi(message.Attributes["ApproximateReceiveCount"]); parseErr == nil && receiveCount >= 5 {
+						observability.Default.Inc("sqs_message_dlq_threshold_reached")
+					}
 					if ctx.Err() == nil {
 						slog.Error("SQS wager message was not completed", "message_id", envelopeMessageID(message.Body), "error", err)
 						if _, visibilityErr := c.client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
@@ -120,6 +126,7 @@ func (c *Consumer) handleBatch(ctx context.Context, messages []types.Message) {
 					}
 					return
 				}
+				observability.Default.Inc("sqs_message_completed")
 			}
 		}()
 	}
@@ -152,6 +159,8 @@ func envelopeMessageID(body *string) string {
 }
 
 func (c *Consumer) handle(ctx context.Context, message types.Message) error {
+	started := time.Now()
+	defer func() { observability.Default.Observe("sqs_message_processing_latency", time.Since(started)) }()
 	var envelope wagerEnvelope
 	if err := json.Unmarshal([]byte(aws.ToString(message.Body)), &envelope); err != nil {
 		return fmt.Errorf("decode SQS wager envelope: %w", err)
